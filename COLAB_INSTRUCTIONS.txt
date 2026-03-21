@@ -1,0 +1,72 @@
+========================================================
+  HOW TO RUN IN GOOGLE COLAB
+========================================================
+
+STEP 1: Upload files to Colab
+  - Upload 'lgd_development_factor_model.py' to Colab
+  - Upload 'Munic_dashboard_LPU_1.xlsx' to Colab
+
+STEP 2: Install dependencies (first cell)
+  !pip install numpy pandas scipy openpyxl plotly
+
+STEP 3: Run the model (second cell)
+  from lgd_development_factor_model import *
+
+  # ── Configuration — change these as needed ──
+  WINDOW_SIZES = [12, 18, 24, 30, 36, 42, 48, 54, 60]
+  CI_METHOD = 'bootstrap'     # 'heuristic' | 'standard_error' | 'bootstrap'
+  CI_LEVEL = 0.50             # 0.50 = 50% CI (25th/75th percentiles)
+  DISCOUNT_RATE = 0.15        # 15% annual
+  LGD_CAP = None              # Set to 1.0 to cap LGD at 100%
+
+  base_config = ModelConfig(
+      discount_rate=DISCOUNT_RATE,
+      window_size=60,
+      max_tid=60,
+      lgd_cap=LGD_CAP,
+      ci_method=CI_METHOD,
+      ci_level=CI_LEVEL,
+  )
+
+  scenarios = run_multi_scenario(
+      filepath='Munic_dashboard_LPU_1.xlsx',
+      window_sizes=WINDOW_SIZES,
+      base_config=base_config,
+      verbose=True,
+  )
+
+STEP 4: Export results (third cell)
+  export_multi_scenario_excel(scenarios, 'LGD_Multi_Scenario_Output.xlsx')
+  generate_dashboard(scenarios, output_path='LGD_Dashboard.html')
+
+STEP 5: Display dashboard inline (fourth cell)
+  from IPython.display import HTML, display
+  with open('LGD_Dashboard.html', 'r') as f:
+      display(HTML(f.read()))
+
+STEP 6: Download files (fifth cell)
+  from google.colab import files
+  files.download('LGD_Multi_Scenario_Output.xlsx')
+  files.download('LGD_Dashboard.html')
+  files.download('LGD_Model_Output.xlsx')
+
+========================================================
+  QUICK SINGLE-WINDOW RUN (if you just want one window)
+========================================================
+
+  from lgd_development_factor_model import *
+
+  config = ModelConfig(
+      discount_rate=0.15,
+      window_size=60,    # Change this: 12, 18, 24, 30, 36, 42, 48, 54, 60
+      max_tid=60,
+      ci_method='bootstrap',
+      ci_level=0.50,
+  )
+
+  vr, bt = run_full_pipeline(
+      'Munic_dashboard_LPU_1.xlsx',
+      config=config,
+      output_path='LGD_Model_Output.xlsx',
+      verbose=True,
+  )

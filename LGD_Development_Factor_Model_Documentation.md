@@ -1,0 +1,241 @@
+# LGD Development Factor Model — Technical Documentation
+
+**Entity:** Eskom Municipal Debt (Non-Metro Municipalities)
+**Model Type:** IFRS 9 Loss Given Default — Development Factor (Chain-Ladder)
+**Revenue Basis:** Recognise Revenue (RR)
+**Author:** Anchor Point Risk (Pty) Ltd
+**Document Date:** March 2026
+
+---
+
+## 1. Executive Summary
+
+This document describes the Loss Given Default (LGD) development factor model used to estimate expected credit losses on Eskom's municipal receivables under IFRS 9. The model constructs a recovery triangle from 82 monthly default cohorts spanning March 2019 to December 2025, applies the chain-ladder (development factor) methodology to project future recoveries, and discounts them at a 15% annual rate to arrive at a present-value LGD term structure indexed by months in default.
+
+The model produces a set of LGD values ranging from approximately 29% at the point of default (TID 0) to near 100% for exposures that have been in default for more than 40 months. A rolling-window backtest across 23 vintage periods confirms that the model produces unbiased forecasts (mean residual = 0.70%) with moderate dispersion (σ = 9.4%). Residual normality is rejected by both Jarque-Bera and Chi-Square tests, indicating the presence of heavier-than-normal tails, which has implications for confidence interval construction.
+
+---
+
+## 2. Model Purpose and Scope
+
+The model serves two primary purposes. First, it provides a term structure of LGD estimates conditioned on the number of months an exposure has been in default, supporting the calculation of lifetime expected credit losses under IFRS 9 paragraph 5.5.3. Second, it provides a backtesting framework to validate that the development factor projections are consistent with subsequently observed recovery outcomes.
+
+The scope is limited to non-metro municipal receivables on a Recognise Revenue (accrual) accounting basis. Separate models exist for Cash Basis accounting and for metropolitan municipalities. The model does not incorporate forward-looking macroeconomic adjustments, downturn LGD overlays, or cure-rate analysis — these are addressed elsewhere in the IFRS 9 framework.
+
+---
+
+## 3. Data Sources and Structure
+
+### 3.1 Master Recovery Triangle
+
+The foundation of the model is a recovery triangle stored in the "RR LGD TERM STRUCTURE ALL" sheet. This contains 82 monthly default cohorts (rows) observed across up to 82 development periods (columns). Each row represents accounts that first entered default status in a particular calendar month, and the columns track the aggregate outstanding balance of that cohort at each subsequent month.
+
+The key fields are as follows. **Period** is the calendar month of default (March 2019 through December 2025). **TID** (Time in Default) represents the maximum number of months of observation available for that cohort — 81 for the oldest cohort and 0 for the most recent. **EAD** is the Exposure at Default, equal to the outstanding balance at the point of default. **TID_0 through TID_81** record the outstanding balance at each month post-default. TID_0 equals the EAD by definition. As time progresses and recoveries occur, these balances decline. Cells are empty (NaN) beyond the cohort's available observation window.
+
+### 3.2 Vintage Window Construction
+
+The model operates on rolling 60-month windows of the master data. The oldest vintage window ("22-81") uses master cohorts 0 through 59, while the latest vintage ("0-59") uses cohorts 22 through 81. Each vintage window represents the sum of the performing exposures at the start of the period that migrated to the non-performing category during the period which is generally monthly. Crucially, within each vintage, each cohort's balance data is restricted to only those TID periods that would have been observable at the vintage date. A cohort that defaulted k months before the vintage end-date can observe at most k months of recovery data, regardless of how much subsequent data exists in the master.
+
+---
+
+## 4. Methodology
+
+### 4.1 Overview
+
+The methodology follows the actuarial chain-ladder approach adapted for credit risk. The five core steps are: (1) construct the observation-masked balance triangle for the vintage window, (2) compute aggregate recovery cash flows at each development period, (3) compute cumulative outstanding balance denominators, (4) build a discount factor matrix, and (5) derive the LGD term structure as one minus the sum of discounted incremental recovery rates.
+
+### 4.2 Aggregate Recovery Calculation
+
+For each development period transition from period n to n+1, the model computes the total recovery across all cohorts that have observations at both periods:
+
+    Recovery(n) = Σᵢ Balance(i, n) − Σᵢ Balance(i, n+1)
+
+where the summation runs over cohorts i that have a non-empty observation at period n+1. This difference captures the total cash received or write-down occurring between development periods n and n+1. The conditional summation ensures that only cohorts with complete paired observations contribute to the recovery estimate.
+
+### 4.3 Cumulative Outstanding Balance
+
+The cumulative outstanding balance forms a lower-triangular matrix. For development period row r and column c, the entry is:
+
+    CumBal(r, c) = Σᵢ Balance(i, r)  [for cohorts with non-empty observation at c+1]
+
+This denominator represents the total portfolio balance at development period r, restricted to cohorts that have sufficient history to observe period c+1. The matrix structure accounts for the progressively smaller number of cohorts available at longer development horizons.
+
+### 4.4 Discount Factor Matrix
+
+The discount factor matrix translates future recovery cash flows to present value. Each entry is computed as:
+
+    DF(r, c) = 1 / (1 + rate)^((c + 1 − r) / 12)
+
+where `rate` is the annual discount rate (15%) and the exponent converts the monthly time difference to an annual basis. The matrix is lower-triangular, with DF(r, r) representing a one-month discount and DF(r, c) for c > r representing progressively longer discounts.
+
+The 15% discount rate is intended as a proxy for the effective interest rate on the underlying receivables. Under IFRS 9 paragraph B5.5.44, the discount rate should reflect the original effective interest rate of the financial instrument.
+
+### 4.5 LGD Term Structure Derivation
+
+The incremental recovery rate at each development period is the ratio of recovery to cumulative balance:
+
+    RecoveryRate(t, c) = Recovery(c) / CumBal(t, c)
+
+The LGD at time-in-default t is then:
+
+    LGD(t) = 1 − Σ_c [ RecoveryRate(t, c) × DF(t, c) ]
+
+where the summation runs over all development periods c ≥ t. This gives the present-value LGD conditional on the exposure currently being t months in default. At TID 0, the sum captures all future expected discounted recoveries. At higher TID values, fewer future recovery periods remain, and the LGD approaches 1.0.
+
+### 4.6 EAD-Weighted Average
+
+The overall portfolio LGD is computed as the EAD-weighted average across cohorts:
+
+    Weighted_LGD = Σᵢ (LGD(TIDᵢ) × EADᵢ) / Σᵢ EADᵢ
+
+where TIDᵢ is the maximum observed time-in-default for cohort i and EADᵢ is its exposure at default. This produces a single summary statistic reflecting the current portfolio composition.
+
+---
+
+## 5. Backtest Framework
+
+### 5.1 Vintage Forecast vs Actual
+
+The backtest compares each vintage's forecasted LGD term structure against the "actual" LGD that materialised in subsequent periods. The forecast LGD term structure represents the LGD term structure that is generated from historical default and loss data  up to that point. The reason for defining the LGDs at a point in time as forecast LGDs is that the last observed LGD terms structure for the observation period is kept constant for the entire backtesting period. the key objective is therefore to determine how the latest LGD represents future possible LGD term structure outcomes. The key obkective of this process isw to determine which historical period best represents future LGD term structure realisations. The actual LGD for vintage v at a given TID is obtained by reading the next vintage's (v+1) full LGD term structure at the same TID. The actual LGDs can therefore be seen as  forecast LGD term structures generated in the future back test period. The reason for defining them as actual is that the future LGD term structures are impacted by actual recovery data. This reflects the updated model estimate incorporating one additional month of observed recovery data.
+
+The comparison is restricted to TID values where genuinely new information exists. For the oldest vintage (hindsight = 22 months), all TID values from 0 through 23 are compared. For each subsequent vintage, the starting TID shifts forward by one, reflecting that short-TID estimates are stable across adjacent vintages and comparing them would add noise rather than signal.
+
+### 5.2 Residual Analysis
+
+Residuals are defined as Actual − Forecast. A positive residual indicates the model underestimated LGD (was too optimistic about recoveries), while a negative residual indicates overestimation.
+
+Across 276 non-null residuals, the model produces a mean error of 0.70% with a standard deviation of 9.4%. The near-zero mean confirms the model is approximately unbiased. The average forecast error by TID is also near zero across all term points, with no systematic over- or under-prediction at particular durations.
+
+### 5.3 Confidence Intervals
+
+## Backtest Confidence Intervals (SEM-based)
+
+The backtest constructs confidence intervals around the cross-vintage mean LGD using the Standard Error of the Mean (SEM). The confidence level is user-configurable via the UI — it is never hardcoded into formulas.
+
+### Setup
+
+1. Accept the user's desired confidence percentile from the UI and store it in a designated input cell.
+2. Compute the corresponding z-value using the inverse standard normal function (e.g. `NORM.S.INV(percentile)` in Excel, or `scipy.stats.norm.ppf(percentile)` in Python). For example, 75% → z ≈ 0.6745.
+
+### Formulas
+
+    Upper = MIN(1, Mean + z × StdDev × SQRT(N_steps / N_vintages))
+    Lower = MAX(0, Mean − z × StdDev × SQRT(N_steps / N_vintages))
+
+where:
+
+- **Mean** = average of the cross-vintage LGD values from the LGD Term Structure Summary for a given term point column
+- **StdDev** = standard deviation of the same cross-vintage LGD values
+- **N_steps** = the term point index for that column (i.e. how many steps along the term structure). This increases across columns, causing the bands to widen for longer-horizon term points.
+- **N_vintages** = total number of vintages in the dataset (derived dynamically from the data, not hardcoded)
+- **z** = z-score corresponding to the user-selected confidence percentile, referenced from the UI input cell
+
+### Key characteristics
+
+- **Bands widen with term point**: The `SQRT(N_steps / N_vintages)` factor means the confidence interval grows as you move further along the term structure. Early term points have narrow bands; later term points have wider bands.
+- **Variable across term points**: Band width differs across columns because Mean, StdDev, and N_steps all change per term point.
+- **Staircase fill pattern**: Each vintage row only has values from its minimum available term point onward, determined by how many months of performance data that vintage has accumulated. Earlier term point columns are left blank for newer vintages. This creates a triangular or staircase shape — the oldest vintage fills the most columns, the newest vintage fills the fewest.
+
+### Output layout
+
+The output consists of two mirrored sections — upper bounds and lower bounds — each structured identically:
+
+1. **Section header row**: A label summarising the parameters, e.g. `"UPPER BOUND ({pctl}th pctl) — SEM CI (z={z_value}, n={N_vintages})"`. All parameter values in the label should be dynamically derived, not typed manually.
+2. **Column header row**: Term point periods (referenced from the term structure definition, not duplicated manually).
+3. **Value rows**: One row per vintage, ordered oldest to newest. Each cell applies the upper or lower formula using the Mean, StdDev, and N_steps for that column. Cells for term points the vintage hasn't yet reached are left blank.
+
+The lower bound section follows the same structure, substituting the lower bound formula.
+
+### Implementation notes
+
+- N_vintages, N_steps, term point ranges, and vintage counts must all be derived from the underlying data so the model adapts automatically when vintages are added or the observation window changes.
+- The z-value must be a single cell reference so the user can change the confidence level and all bands update immediately.
+- Mean and StdDev rows should reference the LGD Term Structure Summary data range dynamically (e.g. using OFFSET/COUNTA or structured references) rather than fixed cell addresses where possible.
+
+### 5.4 Normality Tests
+
+The Jarque-Bera test statistic of 13.3 exceeds the chi-squared critical value of 5.99 (α = 0.05, df = 2), rejecting the null hypothesis of normally distributed residuals. The Chi-Square goodness-of-fit test confirms this with a statistic of 262.3 against a critical value of 16.9.
+
+The residual distribution exhibits approximate symmetry (skewness = 0.19) but is leptokurtic (excess kurtosis ≈ 1.0), indicating heavier tails than a normal distribution. This means extreme forecast errors occur more frequently than a Gaussian model would predict.
+
+---
+
+## 6. Spreadsheet Architecture
+
+### 6.1 Sheet Map
+
+The workbook contains 33 sheets organised into the following groups.
+
+**Parameter Sheets** ("Munic parameters" variants) contain the probability of default results by days-past-due bucket, broken out by Metros, Non-Metros, and Consolidated.
+
+**Master Data** ("RR LGD TERM STRUCTURE ALL") holds the complete 82-cohort recovery triangle that all calculations reference.
+
+**Calculation Sheets**  — The workbook contains one vintage-specific calculation sheet per vintage in the backtest set, each named "RR LGD TERM STRUCTURES (X-Y)" where X-Y denotes the cohort range. The number of these sheets is not fixed — it is determined dynamically by the number of vintages in the backtest vintage set. In the prototype, this produces 23 sheets, but any implementation must handle an arbitrary vintage count.
+
+Each vintage sheet contains seven computational blocks:
+
+1. The observation-masked balance triangle
+2. The weighted LGD lookup row
+3. Model parameters
+4. Aggregate recovery amounts
+5. Cumulative balance matrix
+6. Discount factor matrix
+7. The LGD term structure calculation
+
+The un-suffixed "RR LGD TERM STRUCTURES" sheet is structurally identical to the latest vintage (e.g. 0-59 in the prototype) and always reflects whichever vintage has the shortest cohort range in the current dataset.
+
+**Summary Sheets** 
+
+**Reference Sheets** — "INSTRUCTIONS" provides tab descriptions. Additional sheets cover PD calculations, roll-to-default analysis, and delinquency tracking.
+
+### 6.2 Key Formulas
+
+The recovery at development period n is computed as an array formula: `{=SUM(IF(col_{n+1}<>"", col_n)) - SUM(col_{n+1})}`, where the IF condition restricts the sum to cohorts with observations at the next period.
+
+The cumulative balance denominator for row r, column c is: `{=SUM(IF(col_{c+1}<>"", col_r))}`, applying the same observation mask.
+
+The discount factor is: `=1/(1+rate)^((col-row)/12)` where the rate cell contains 0.15.
+
+The LGD at each TID is: `=1 - SUMPRODUCT(recovery_rates, discount_factors)`, where recovery rates are `=IFERROR(Recovery/CumBal, 0)`.
+
+---
+
+## 7. Key Findings and Recommendations
+
+### 7.1 Model Performance
+
+The development factor model performs well for this portfolio. The mean forecast error is near zero (0.7%), confirming absence of systematic bias. The standard deviation of 9.4% reflects moderate forecast uncertainty, which is expected given the heterogeneous nature of municipal payment behaviour.
+
+### 7.2 Issues Identified
+
+**LGD values exceeding 1.0**: The latest vintage produces LGD values above 100% at TID 42–49 (maximum 102.9%). This occurs because discounting penalises very late recoveries sufficiently to push cumulative discounted recovery below zero at the margin. A decision should be documented on whether to cap LGD at 1.0 or accept economic LGD > 1.
+
+**Non-normal residuals**: The leptokurtic residual distribution means the normal-approximation confidence intervals understate tail risk. Consider replacing the z-based CI with empirical quantiles or a t-distribution with estimated degrees of freedom.
+
+**Confidence interval formulation**: The `√(N − hindsight)` scaling produces dramatically wide bands for recent vintages. This is a heuristic rather than a standard statistical CI. Consider using bootstrap resampling or the standard error of the mean for more rigorous uncertainty quantification.
+
+---
+
+## 8. Glossary
+
+**Chain-Ladder**: An actuarial technique for projecting the ultimate development of claims or losses from incomplete triangular data, using ratios of successive development period totals.
+
+**Cohort**: A group of accounts that entered default status in the same calendar month.
+
+**Development Factor**: The ratio of cumulative recoveries at successive development periods, used to project future recovery patterns from incomplete data.
+
+**EAD (Exposure at Default)**: The outstanding balance at the point an account first enters default status.
+
+**EIR (Effective Interest Rate)**: The rate that exactly discounts estimated future cash flows through the expected life of the financial instrument to its gross carrying amount.
+
+**Hindsight**: The number of months of subsequent data available beyond a given vintage date, used to measure how much validation evidence exists.
+
+**IFRS 9**: International Financial Reporting Standard 9 — Financial Instruments, which requires entities to recognise expected credit losses on financial assets.
+
+**LGD (Loss Given Default)**: The proportion of exposure that is not recovered following default, expressed as a percentage of EAD.
+
+**Recovery Triangle**: A matrix where rows represent default cohorts and columns represent months since default, with entries showing outstanding balances. The upper-right portion is empty because recent cohorts have not been observed long enough.
+
+**TID (Time in Default)**: The number of months elapsed since an account entered default status.
+
+**Vintage**: A specific rolling window of cohorts used to estimate the LGD term structure. Each vintage represents the information set available at a particular point in time.
