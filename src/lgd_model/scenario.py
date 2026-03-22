@@ -1,9 +1,10 @@
-"""Multi-scenario runner and window size optimiser.
+"""Multi-scenario runner and minimum observation window optimiser.
 
-Key design: the backtest period is fixed by the reference window (typically
-60 months). Smaller windows (12, 18, 24, ...) produce forecasts at the
-SAME dates using fewer months of preceding data to calibrate the chain-ladder.
-max_tid stays at the base config value (60) for all window sizes.
+Key design: all scenarios use the same 60-cohort rolling window (window_size=60)
+to produce the same 23 vintages. The min_obs_window parameter (12, 18, 24, ...)
+controls how many cohorts are used per TID column in the chain-ladder
+calculations — a sliding window that shifts backward for higher TIDs.
+This decouples the forecast horizon from the calibration depth.
 """
 
 from dataclasses import dataclass
@@ -86,25 +87,30 @@ def run_scenario(
     window_size: int,
     base_config: ModelConfig,
     store_detail: bool = False,
+    min_obs_window: int | None = None,
 ) -> ScenarioResult | None:
-    """Run a single window-size scenario and compute backtest metrics.
+    """Run a single scenario and compute backtest metrics.
 
-    The prediction horizon (max_tid) stays at base_config.max_tid (typically
-    60) regardless of window size. For windows smaller than the reference,
-    vintages are aligned to the same end-dates as the reference window would
-    produce — only the last N vintages are used, where N matches what the
-    reference window gives.
+    All scenarios use window_size=base_config.window_size (60) for the
+    rolling vintage window, producing the same 23 vintages. The
+    min_obs_window parameter controls how many cohorts are used per TID
+    column in the chain-ladder calculations.
 
     Parameters
     ----------
     master_df : pd.DataFrame
         Master DataFrame from load_recovery_triangle.
     window_size : int
-        Number of months of calibration data per vintage.
+        The min_obs_window label for this scenario (used for display
+        and AIC penalty). The actual rolling window is always
+        base_config.window_size.
     base_config : ModelConfig
         Base configuration (discount_rate, ci_percentile, max_tid, etc.).
     store_detail : bool
         If True, store intermediate triangles in each VintageResult.
+    min_obs_window : int or None
+        Minimum observation window per TID column. If None and
+        window_size < base_config.window_size, uses window_size.
 
     Returns
     -------
@@ -112,46 +118,31 @@ def run_scenario(
         None if insufficient data.
     """
     n_total = len(master_df)
-    if window_size > n_total:
-        return None
 
-    # max_tid stays at the base config value — do NOT cap to window_size
+    # Determine the effective min_obs_window
+    effective_mow = min_obs_window
+    if effective_mow is None and window_size < base_config.window_size:
+        effective_mow = window_size
+    # When window_size == base_config.window_size and no explicit mow, leave as None
+    # (original behaviour: use all cohorts)
+
+    # Always use the reference window_size for the rolling vintage window
     config = ModelConfig(
         discount_rate=base_config.discount_rate,
-        window_size=window_size,
+        window_size=base_config.window_size,
         max_tid=base_config.max_tid,
         lgd_cap=base_config.lgd_cap,
         ci_percentile=base_config.ci_percentile,
+        min_obs_window=effective_mow,
     )
 
+    if config.window_size > n_total:
+        return None
+
     try:
-        all_vr = run_vintage_analysis(master_df, config, store_detail=store_detail)
+        vr = run_vintage_analysis(master_df, config, store_detail=store_detail)
     except ValueError:
         return None
-
-    # Align vintages to reference window dates.
-    # The reference window (base_config.window_size) produces ref_n_vintages.
-    # For smaller windows, we have MORE vintages — take only the last
-    # ref_n_vintages so they share the same end-dates.
-    ref_window = base_config.window_size
-    ref_n_vintages = n_total - ref_window + 1
-    if ref_n_vintages < 3:
-        return None
-
-    if len(all_vr) > ref_n_vintages:
-        # Skip earlier vintages to align with reference window dates
-        skip = len(all_vr) - ref_n_vintages
-        vr = all_vr[skip:]
-        # Update labels and hindsight to match the aligned position
-        for i, v in enumerate(vr):
-            hindsight = len(vr) - 1 - i
-            v.hindsight = hindsight
-            if i == len(vr) - 1:
-                oldest_off = n_total - 1 - (v.end_idx - 1)
-                newest_off = n_total - 1 - v.start_idx
-                v.vintage_label = f"Latest ({oldest_off}-{newest_off})"
-    else:
-        vr = all_vr
 
     if len(vr) < 3:
         return None
@@ -171,7 +162,7 @@ def run_scenario(
     q75, q25 = np.percentile(flat, [75, 25])
     iqr = float(q75 - q25)
 
-    # AIC-like proxy
+    # AIC-like proxy — penalise by the min_obs_window (or window_size)
     n = len(flat)
     sse = float(np.sum(flat ** 2))
     k = window_size
@@ -216,17 +207,20 @@ def run_multi_scenario(
     verbose: bool = True,
     store_detail: bool = False,
 ) -> list[ScenarioResult]:
-    """Run the model across multiple window sizes and rank them.
+    """Run the model across multiple min-observation windows and rank them.
 
-    All scenarios are aligned to the same backtest dates defined by
-    the reference window (base_config.window_size, default 60).
+    All scenarios use the same 60-cohort rolling window (base_config.window_size)
+    to produce the same set of vintages. The window_sizes parameter controls
+    the min_obs_window per scenario — the number of cohorts used per TID
+    column in the chain-ladder calculations.
 
     Parameters
     ----------
     filepath : str
         Path to the input workbook.
     window_sizes : list[int] or None
-        Window sizes to evaluate. Default: [12, 18, 24, 30, 36, 42, 48, 54, 60].
+        Minimum observation windows to evaluate.
+        Default: [12, 18, 24, 30, 36, 42, 48, 54, 60].
     base_config : ModelConfig or None
         Base configuration. Default: ModelConfig().
     verbose : bool
@@ -246,10 +240,10 @@ def run_multi_scenario(
 
     if verbose:
         print("=" * 70)
-        print("  MULTI-SCENARIO WINDOW SIZE ANALYSIS")
+        print("  MULTI-SCENARIO MIN-OBSERVATION WINDOW ANALYSIS")
         print("=" * 70)
-        print(f"  Window sizes to test: {window_sizes}")
-        print(f"  Reference window: {base_config.window_size}m")
+        print(f"  Min-obs windows to test: {window_sizes}")
+        print(f"  Vintage window: {base_config.window_size}m (fixed)")
         print(f"  Discount rate: {base_config.discount_rate:.1%}")
         print(f"  CI percentile: {base_config.ci_percentile:.0%}")
 
@@ -258,18 +252,20 @@ def run_multi_scenario(
     ref_n_vintages = n_total - base_config.window_size + 1
     if verbose:
         print(f"  Total cohorts: {n_total}")
-        print(f"  Aligned backtest vintages: {ref_n_vintages}")
+        print(f"  Backtest vintages: {ref_n_vintages}")
         print()
 
     scenarios: list[ScenarioResult] = []
     for ws in window_sizes:
-        if ws > n_total:
-            if verbose:
-                print(f"  Window {ws:>3}m: SKIPPED (exceeds {n_total} cohorts)")
-            continue
         if verbose:
-            print(f"  Window {ws:>3}m: computing...", end='', flush=True)
-        result = run_scenario(master_df, ws, base_config, store_detail=store_detail)
+            print(f"  Min-obs {ws:>3}m: computing...", end='', flush=True)
+        # ws == base_config.window_size → min_obs_window=None (use all cohorts)
+        mow = ws if ws < base_config.window_size else None
+        result = run_scenario(
+            master_df, ws, base_config,
+            store_detail=store_detail,
+            min_obs_window=mow,
+        )
         if result is not None:
             scenarios.append(result)
             if verbose:
@@ -287,10 +283,10 @@ def run_multi_scenario(
     if verbose and scenarios:
         print()
         print("=" * 70)
-        print("  WINDOW SIZE RANKING (best to worst)")
+        print("  MIN-OBS WINDOW RANKING (best to worst)")
         print("=" * 70)
         print(
-            f"  {'Rank':>4} {'Window':>7} {'RMSE':>8} {'MAE':>8} "
+            f"  {'Rank':>4} {'MinObs':>7} {'RMSE':>8} {'MAE':>8} "
             f"{'Bias':>8} {'MaxErr':>8} {'Score':>8} {'Vintages':>9}"
         )
         print(
@@ -306,7 +302,7 @@ def run_multi_scenario(
             )
 
         best = scenarios[0]
-        print(f"\n  RECOMMENDATION: {best.window_size}-month window")
+        print(f"\n  RECOMMENDATION: {best.window_size}-month min-obs window")
         print(f"    - Composite score: {best.composite_score:.4f}")
         print(f"    - RMSE: {best.rmse:.4f}")
         print(f"    - Mean bias: {best.mean_error:+.4f}")

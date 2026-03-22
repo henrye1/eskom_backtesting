@@ -10,17 +10,56 @@ machine precision against the client's Excel workbook.
 import numpy as np
 
 
-def compute_aggregate_recoveries(balance_matrix: np.ndarray) -> np.ndarray:
+def _compute_cohort_range(
+    tid_col: int,
+    min_obs_window: int,
+    n_cohorts: int,
+) -> tuple[int, int]:
+    """Compute the cohort index range for a given TID column.
+
+    When min_obs_window is set, a sliding window of that size shifts
+    backward for higher TIDs. At TID 0 the most recent min_obs_window
+    cohorts are used; at higher TIDs the window slides to include
+    older cohorts that have data at that TID.
+
+    Parameters
+    ----------
+    tid_col : int
+        TID column index (0-based).
+    min_obs_window : int
+        Number of cohorts to include per TID column.
+    n_cohorts : int
+        Total number of cohorts in the balance matrix.
+
+    Returns
+    -------
+    tuple[int, int]
+        (start_idx, end_idx) — 0-based, exclusive end.
+    """
+    end_idx = max(min_obs_window, n_cohorts - tid_col)
+    start_idx = max(0, end_idx - min_obs_window)
+    return start_idx, end_idx
+
+
+def compute_aggregate_recoveries(
+    balance_matrix: np.ndarray,
+    min_obs_window: int | None = None,
+) -> np.ndarray:
     """Compute aggregate recoveries from the balance matrix.
 
     For transition n to n+1:
         Recovery(n) = SUM(Balance(i,n) for cohorts with obs at n+1)
                     - SUM(Balance(i,n+1) for same cohorts)
 
+    When min_obs_window is set, only the last min_obs_window cohorts
+    (sliding per TID) are considered for each transition.
+
     Parameters
     ----------
     balance_matrix : np.ndarray
         Shape (n_cohorts, n_periods). NaN = unobserved.
+    min_obs_window : int or None
+        If set, restrict to a sliding window of this many cohorts per TID.
 
     Returns
     -------
@@ -30,14 +69,24 @@ def compute_aggregate_recoveries(balance_matrix: np.ndarray) -> np.ndarray:
     n_cohorts, n_periods = balance_matrix.shape
     recoveries = np.zeros(n_periods)
     for n in range(n_periods - 1):
-        has_next = ~np.isnan(balance_matrix[:, n + 1])
-        bal_n = np.where(has_next, np.nan_to_num(balance_matrix[:, n], nan=0.0), 0.0)
-        bal_n1 = np.where(has_next, np.nan_to_num(balance_matrix[:, n + 1], nan=0.0), 0.0)
+        if min_obs_window is not None:
+            start, end = _compute_cohort_range(n, min_obs_window, n_cohorts)
+            sub = balance_matrix[start:end, :]
+            has_next = ~np.isnan(sub[:, n + 1])
+            bal_n = np.where(has_next, np.nan_to_num(sub[:, n], nan=0.0), 0.0)
+            bal_n1 = np.where(has_next, np.nan_to_num(sub[:, n + 1], nan=0.0), 0.0)
+        else:
+            has_next = ~np.isnan(balance_matrix[:, n + 1])
+            bal_n = np.where(has_next, np.nan_to_num(balance_matrix[:, n], nan=0.0), 0.0)
+            bal_n1 = np.where(has_next, np.nan_to_num(balance_matrix[:, n + 1], nan=0.0), 0.0)
         recoveries[n] = bal_n.sum() - bal_n1.sum()
     return recoveries
 
 
-def compute_cumulative_balances(balance_matrix: np.ndarray) -> np.ndarray:
+def compute_cumulative_balances(
+    balance_matrix: np.ndarray,
+    min_obs_window: int | None = None,
+) -> np.ndarray:
     """Compute cumulative balance matrix.
 
     For row r, column c:
@@ -45,10 +94,16 @@ def compute_cumulative_balances(balance_matrix: np.ndarray) -> np.ndarray:
 
     Special case: last column uses ~isnan(balance_matrix[:, c]) instead of c+1.
 
+    When min_obs_window is set, both the condition check (which cohorts
+    have data at c+1) and the balance sum (at column r) are restricted
+    to the same sliding cohort window determined by column c.
+
     Parameters
     ----------
     balance_matrix : np.ndarray
         Shape (n_cohorts, n_periods).
+    min_obs_window : int or None
+        If set, restrict to a sliding window of this many cohorts per TID column.
 
     Returns
     -------
@@ -59,11 +114,20 @@ def compute_cumulative_balances(balance_matrix: np.ndarray) -> np.ndarray:
     cum_bal = np.full((n_periods, n_periods), np.nan)
     for r in range(n_periods):
         for c in range(r, n_periods):
-            if c + 1 < n_periods:
-                has_obs = ~np.isnan(balance_matrix[:, c + 1])
+            if min_obs_window is not None:
+                start, end = _compute_cohort_range(c, min_obs_window, n_cohorts)
+                sub = balance_matrix[start:end, :]
+                if c + 1 < n_periods:
+                    has_obs = ~np.isnan(sub[:, c + 1])
+                else:
+                    has_obs = ~np.isnan(sub[:, c])
+                bal_r = np.where(has_obs, np.nan_to_num(sub[:, r], nan=0.0), 0.0)
             else:
-                has_obs = ~np.isnan(balance_matrix[:, c])
-            bal_r = np.where(has_obs, np.nan_to_num(balance_matrix[:, r], nan=0.0), 0.0)
+                if c + 1 < n_periods:
+                    has_obs = ~np.isnan(balance_matrix[:, c + 1])
+                else:
+                    has_obs = ~np.isnan(balance_matrix[:, c])
+                bal_r = np.where(has_obs, np.nan_to_num(balance_matrix[:, r], nan=0.0), 0.0)
             cum_bal[r, c] = bal_r.sum()
     return cum_bal
 

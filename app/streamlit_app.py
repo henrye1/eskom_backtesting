@@ -30,6 +30,7 @@ from components.tables import render_scenario_table
 from components.charts import render_all_charts
 from components.backtest_tables import render_backtest_summary
 from components.triangle_viewer import render_triangle_viewer
+from components.comparison import render_scenario_comparison
 
 st.set_page_config(
     page_title="Development Factor LGD Backtesting",
@@ -122,14 +123,14 @@ if params['uploaded_file'] is not None and params['run_clicked']:
     # ── Window selector (applies to all sections) ──
     st.markdown("---")
     sel_window = st.selectbox(
-        "Select window size",
+        "Select min-observation window",
         options=[s.window_size for s in scenarios],
         index=next(
             (i for i, s in enumerate(scenarios) if s.window_size == 60),
             0,
         ),
         format_func=lambda w: f"{w} months"
-            + (" (reference)" if w == 60 else "")
+            + (" (full)" if w == 60 else "")
             + (" (recommended)" if w == scenarios[0].window_size else ""),
     )
     sel_scenario = next(
@@ -142,22 +143,28 @@ if params['uploaded_file'] is not None and params['run_clicked']:
 
     # ── 2. Scenario Comparison ──
     st.markdown("---")
-    st.subheader("Scenario Comparison — All Window Sizes")
+    st.subheader("Scenario Comparison — All Min-Observation Windows")
     st.caption(
-        "All windows aligned to same backtest dates. "
-        "max_tid = 60 for all. Ranked by composite score (lower = better)."
+        "All scenarios use 60-cohort vintages (23 vintages). "
+        "Min-obs window controls cohort restriction per TID. "
+        "Ranked by composite score (lower = better)."
     )
     render_scenario_table(scenarios)
 
-    # ── 3. Charts ──
+    # ── 3. Scenario Comparison (pick any two) ──
+    if len(scenarios) >= 2:
+        st.markdown("---")
+        render_scenario_comparison(scenarios)
+
+    # ── 4. Charts ──
     st.markdown("---")
     render_all_charts(scenarios, selected_window=sel_window)
 
-    # ── 4. Triangle Inspection ──
+    # ── 5. Triangle Inspection ──
     st.markdown("---")
     render_triangle_viewer(sel_scenario)
 
-    # ── 5. Downloads ──
+    # ── 6. Downloads ──
     st.markdown("---")
     st.subheader("Downloads")
     col1, col2, col3 = st.columns(3)

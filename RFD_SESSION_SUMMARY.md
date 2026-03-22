@@ -1,18 +1,21 @@
-# RFD — Eskom LGD Backtesting Project Session Summary
-**Date**: 2026-03-20
+# RFD -- Eskom LGD Backtesting Project Session Summary
+**Date**: 2026-03-22 (updated)
 **Client**: Anchor Point Risk (Pty) Ltd
-**Entity**: Eskom — Non-Metro Municipal Debt
+**Entity**: Eskom -- Non-Metro Municipal Debt
+**Repository**: https://github.com/henrye1/eskom_backtesting
 
 ---
 
 ## 1. What Was Built
 
-Refactored the validated monolithic script `lgd_development_factor_model.py` (1,178 lines) into a clean modular Python package with a Streamlit dashboard.
+Refactored the validated monolithic script `lgd_development_factor_model.py` (1,178 lines) into a clean modular Python package. The application has been migrated from Streamlit to a **FastAPI + React** architecture with a TypeScript frontend.
 
 ### Project Structure
 ```
 eskom_backtesting/
 ├── CLAUDE.md                          # Project spec (source of truth)
+├── PROJECT_REQUIREMENTS.md            # Formal requirements document
+├── LGD_Development_Factor_Model_Documentation.md  # Technical documentation
 ├── pyproject.toml / requirements.txt  # Package config
 ├── src/lgd_model/
 │   ├── config.py          # ModelConfig dataclass
@@ -24,8 +27,37 @@ eskom_backtesting/
 │   ├── scenario.py        # ScenarioResult, run_scenario, run_multi_scenario
 │   ├── export.py          # Excel export functions
 │   └── dashboard.py       # Plotly HTML dashboard (10 charts)
-├── app/
-│   ├── streamlit_app.py   # Main Streamlit dashboard (single-page layout)
+├── api/                             # ** NEW — FastAPI backend **
+│   ├── main.py            # App factory, CORS, health check, config defaults
+│   ├── models.py          # Pydantic request/response schemas
+│   ├── routers/
+│   │   ├── upload.py      # File upload endpoint
+│   │   ├── analysis.py    # Run analysis, return JSON results
+│   │   └── download.py    # Excel/HTML download endpoints
+│   └── services/
+│       ├── file_store.py  # Temporary file management with expiry
+│       ├── job_manager.py # Background job execution
+│       ├── chart_builder.py # Server-side Plotly chart config
+│       └── serializers.py # NumPy/pandas to JSON serialization
+├── frontend/                        # ** NEW — React + TypeScript **
+│   ├── package.json       # Vite + React 19 + TanStack + Plotly
+│   ├── src/
+│   │   ├── App.tsx        # Main app component
+│   │   ├── main.tsx       # Entry point
+│   │   ├── plotly.d.ts    # Plotly ESM/CJS type declaration
+│   │   ├── api/           # Axios API client
+│   │   ├── store/         # Zustand state management
+│   │   ├── pages/
+│   │   │   └── Dashboard.tsx  # Main dashboard page
+│   │   └── components/
+│   │       ├── cards/     # KPI metric cards
+│   │       ├── charts/    # Plotly chart components
+│   │       ├── common/    # Shared UI components
+│   │       ├── layout/    # Page layout components
+│   │       └── tables/    # Data table components
+│   └── vite.config.ts
+├── app/                             # Legacy Streamlit dashboard
+│   ├── streamlit_app.py   # Single-page layout
 │   └── components/
 │       ├── sidebar.py           # Parameter controls + z-score override
 │       ├── summary_cards.py     # KPI metric cards
@@ -48,131 +80,141 @@ eskom_backtesting/
 
 ---
 
-## 2. Key Design Decisions Made During Session
+## 2. Architecture Migration: Streamlit to FastAPI + React
 
-### 2.1 Window Alignment (Fixed)
-**Problem**: Originally, each window size (12, 18, 24, ..., 60) produced its own number of vintages and its own independent backtest.
-**Fix**: All windows now align to the **same 23 backtest dates** defined by the 60-month reference window. Smaller windows use fewer months of calibration data but forecast at the same dates. `max_tid` stays at 60 for all windows.
-**File**: `src/lgd_model/scenario.py` lines 118-145
+### 2.1 Why the Migration
 
-### 2.2 Confidence Interval Formula
-**Final formula** (matching Excel cell `AA82`):
+The original Streamlit dashboard was functional but limited in interactivity, layout control, and deployment flexibility. The project was migrated to a decoupled architecture:
+
+- **FastAPI backend** (port 8001) serves the Python computation engine as a REST API
+- **React frontend** (Vite dev server, port 5173) provides a modern interactive dashboard
+- The core `src/lgd_model/` package remains unchanged -- only the presentation layer was replaced
+
+### 2.2 FastAPI Backend
+
+The API layer (`api/`) wraps the existing lgd_model package:
+
+- `POST /api/upload` -- Upload Excel workbook, receive session ID
+- `POST /api/analysis/run` -- Run multi-scenario analysis with configurable parameters
+- `GET /api/analysis/results/{session_id}` -- Retrieve cached results as JSON
+- `GET /api/download/{type}/{session_id}` -- Download Excel or HTML exports
+- `GET /api/health` -- Health check
+- `GET /api/config/defaults` -- Default parameter values
+
+CORS is configured for the Vite dev server origin (`http://localhost:5173`).
+
+### 2.3 React Frontend
+
+Built with modern React 19 + TypeScript stack:
+
+- **Plotly.js** for interactive charts (via react-plotly.js wrapper)
+- **TanStack Query** for server state management and API response caching
+- **TanStack Table** for sortable/filterable data tables
+- **Zustand** for client-side state (selected window, parameters)
+- **Tailwind CSS** for styling
+- **Vite** for fast HMR development and production builds
+
+### 2.4 Port 8001 Workaround
+
+Port 8000 has a persistent zombie socket issue on Windows (the port remains bound after process termination). The backend runs on port 8001 as a workaround. The frontend Vite proxy is configured accordingly.
+
+---
+
+## 3. Key Design Decisions
+
+### 3.1 Window Alignment (Unchanged from Original)
+All windows align to the **same 23 backtest dates** defined by the 60-month reference window. Smaller windows use fewer months of calibration data but forecast at the same dates. `max_tid` stays at 60 for all windows.
+
+### 3.2 CI Formula -- Updated to Documentation Spec
+
+The CI formula has been updated to match the formal documentation:
+
 ```
-Upper[i, t] = MIN(1, Forecast[0, t] + z × Std[t] × √(step / total_steps))
-Lower[i, t] = MAX(0, Forecast[0, t] - z × Std[t] × √(step / total_steps))
+Upper = MIN(1, Mean + z * StdDev * SQRT(N_steps / N_vintages))
+Lower = MAX(0, Mean - z * StdDev * SQRT(N_steps / N_vintages))
 ```
+
 Where:
-- `Forecast[0, t]` = first vintage's forecast at TID t (the reference forecast)
-- `z` = NORM.S.INV(1 - α/2), user-selectable, default 90% CI
-- `Std[t]` = cross-vintage std of forecast at TID t (ddof=1)
-- `step` = position within the TID column (1, 2, 3, ... increasing down)
-- `total_steps` = count of all values in that TID column = min(t, n_v - 1)
-- Bounds WIDEN going down each column (more steps from forecast)
-- Higher TIDs have more vintages in their column → different scaling
+- **Mean** = cross-vintage nanmean of forecast LGD at each TID
+- **StdDev** = cross-vintage nanstd (ddof=1) of forecast LGD at each TID
+- **N_steps** = term-point index (increases across columns, widening bands)
+- **N_vintages** = total vintage count (derived dynamically from data)
+- **z** = `NORM.S.INV(ci_percentile)`, user-configurable (default 75th pctl, z = 0.6745)
 
-**Mean in CI blocks** = `Forecast[0, t]` (first row of forecast table), NOT cross-vintage nanmean.
+The implementation in `backtest.py` uses a per-cell variant with `scale = z * StdDev[t] * sqrt(H_i / t)` where H_i is per-vintage hindsight. Both produce widening bands; the per-cell variant additionally varies by vintage row for the staircase pattern.
 
-**CI diagonal mask**: `start_tid = i + 1` for ALL vintages (no i=0 special case), unlike the Actual mask which has TID 0 for vintage 0.
+### 3.3 Per-TID Backtesting (Not Per-Vintage)
 
-**File**: `src/lgd_model/backtest.py` — `_compute_confidence_intervals()`, method `normal_sem`
+Backtesting is performed **column-wise** (per TID), not row-wise (per vintage). For each TID column:
+- Actual values across vintages form the test series
+- Mean = forecast center (Forecast[0, t] or cross-vintage nanmean)
+- Upper/Lower CI bands apply per TID column
+- Coverage % computed per TID
 
-### 2.3 Mean / Std Rows
-- `Mean[t]` = `nanmean(forecast[:, t])` across all 23 vintages — matches Excel row 52
-- `Std[t]` = `nanstd(forecast[:, t], ddof=1)` — matches Excel row 53
-- These are the cross-vintage statistics used for CI computation
-
-### 2.4 Backtest Diagonal Pattern (Unchanged from Source)
+### 3.4 Backtest Diagonal Pattern (Unchanged -- Critical)
 ```python
 for i in range(n_v - 1):
     hindsight = n_v - 1 - i
     source_idx = i + 1           # Actual from NEXT vintage
     start_tid = 0 if i == 0 else (n_v - hindsight)
-    end_tid = n_v + 1            # NOT n_v — gives 276 residuals
+    end_tid = n_v + 1            # NOT n_v -- gives 276 residuals
 ```
-- Actual[v0] = Forecast[v1] (verified to machine precision)
-- 276 non-NaN residuals
 
-### 2.5 Per-TID Backtesting (Not Per-Vintage)
-The backtest analysis is done **column-wise** (per TID), not row-wise (per vintage). For each TID column, the forecast values across vintages approximate a stationary series. The per-TID blocks transpose column t from each matrix:
-- Actual = `actual_matrix[:, t]` across vintages
-- Mean = `Forecast[0, t]` (constant horizontal line)
-- Upper/Lower = from the CI formula above (constant per vintage at this TID when using SEM, or varying with sqrt scaling)
-
-### 2.6 Vintage Observation Mask (Unchanged — Critical)
+### 3.5 Vintage Observation Mask (Unchanged -- Critical)
 ```python
 offset = n_total - end_idx
 adjusted_max_tid = int(master_tids[cohort_master_idx]) - offset
 if adjusted_max_tid < n_periods:
     window[i, max(0, adjusted_max_tid + 1):] = np.nan
 ```
-This restricts each cohort to data observable at the vintage date.
+
+### 3.6 Plotly ESM/CJS Interop Fix
+
+The `plotly.js-dist-min` package ships as CommonJS while the frontend uses ES modules (`"type": "module"` in package.json). This was resolved with:
+- A custom TypeScript declaration file (`plotly.d.ts`) for module typing
+- Lazy loading of Plotly components to avoid SSR/CJS import errors
+- Chart factory pattern for consistent chart instantiation
 
 ---
 
-## 3. Streamlit Dashboard Layout
+## 4. Streamlit Dashboard Layout (Legacy)
 
-Single-page scrollable layout (no tabs):
+The legacy Streamlit dashboard remains functional at `streamlit run app/streamlit_app.py`. Single-page scrollable layout with:
 
-1. **KPI Cards** — Recommended Window, RMSE, MAE, Bias, LGD at TID=0
-2. **Window Selector** — one dropdown controls all sections
-3. **Backtest Summary Tables** (matching Excel `LGD Backtest Summary`):
-   - FORECAST LGD BY VINTAGE
-   - ACTUAL LGD BY VINTAGE (DIAGONAL)
-   - Mean / Std Deviation
-   - MEAN LGD BY VINTAGE (actual diagonal mask)
-   - UPPER BOUND (CI diagonal mask, step/total scaling)
-   - LOWER BOUND (CI diagonal mask)
-   - DIFFERENCE (ACTUAL - FORECAST)
-   - Normality Tests (JB, Chi-Square)
-4. **Per-TID Backtest Blocks** — for each TID column:
-   - Data table (Actual, Mean, Upper, Lower across vintages)
-   - Chart with CI band, mean line, green/red markers, coverage %
-   - Charts rendered 2 per row, compact (280px)
-5. **Scenario Comparison** — all windows ranked by composite score
-6. **Charts** — 10 Plotly charts (term structure, forecast vs actual, error by TID, etc.)
-7. **Triangle Inspection** — per-vintage balance matrix, recovery, cumbal, discount, LGD
-8. **Downloads** — Multi-scenario Excel, single-window Excel, HTML dashboard
-
-### Sidebar Controls
-- File uploader
-- Window size checkboxes (12-60m)
-- CI Method: `normal_sem` (default), standard_error, bootstrap, heuristic
-- CI Level slider (0.10 - 0.99, default 0.90)
-- z-score override input (auto-calculated, editable)
-- Discount rate (default 0.15)
-- LGD cap toggle
-- Store triangle details toggle
+1. **KPI Cards** -- Recommended Window, RMSE, MAE, Bias, LGD at TID=0
+2. **Window Selector** -- one dropdown controls all sections
+3. **Backtest Summary Tables** (matching Excel `LGD Backtest Summary`)
+4. **Per-TID Backtest Blocks** -- data table + CI band chart per TID
+5. **Scenario Comparison** -- all windows ranked by composite score
+6. **Charts** -- 10 Plotly charts
+7. **Triangle Inspection** -- per-vintage balance matrix, recovery, cumbal, discount, LGD
+8. **Downloads** -- Multi-scenario Excel, single-window Excel, HTML dashboard
 
 ---
 
-## 4. Known Issues / Open Items
+## 5. Known Issues / Open Items
 
-### 4.1 Data Version Mismatch
-The Excel workbook `Munic_dashboard_LPU_1.xlsx` as read by the code has:
-- 82 cohorts, 23 vintages (60m window)
-- z=0.6745 in Excel header (50% CI)
-- Forecast[0,0] = 0.225515, TID 23 upper starts at 54.5%
+### 5.1 Plotly Chart Rendering (Open)
+The React Plotly chart components need a final fix for the lazy-loading wrapper. The ESM/CJS interop workaround is in place (`plotly.d.ts` + lazy import) but some chart types may not render correctly on initial load.
 
-The user's current working version appears to have different data (upper at TID 23 starts at 57.5%, mean at ~52%). The **formulas are identical** but input data differs. When the user uploads their current workbook, values should match.
+### 5.2 Chart Factory Double-Nested Default Export (Open)
+The chart factory module has a double-nested default export pattern that needs cleanup. This causes issues when importing chart components in certain contexts.
 
-### 4.2 CI Level Default
-- Code default: 90% CI (z ≈ 1.6449)
-- Excel workbook header: "75th pctl -- SEM CI (z=0.6745, n=23)" = 50% CI
-- User preference: 90% CI with z=1.64
-- **User should set z-override to match their spreadsheet** when comparing
+### 5.3 Port 8000 Zombie Socket (Workaround)
+On Windows 11, port 8000 occasionally retains a zombie socket after process termination. Using port 8001 as the backend port avoids this issue. The Vite proxy configuration points to 8001.
 
-### 4.3 Not Yet Implemented
-- README.md (user documentation)
-- `notebooks/exploration.ipynb` placeholder
-- Git repository initialization
-- The `data/` directory convention (workbook currently in project root)
+### 5.4 Data Version Mismatch (Documented)
+The Excel workbook `Munic_dashboard_LPU_1.xlsx` as read by the code has specific reference values (Forecast[0,0] = 0.225515, etc.). The user's current working version may have different input data. Formulas are identical; values will match when the same workbook is used.
+
+### 5.5 CI Formula Reconciliation (To Reconcile)
+The documentation specifies `sqrt(N_steps / N_vintages)` while the implementation uses a per-cell `sqrt(H_i / t)` variant. Both produce widening bands but differ in how they vary across vintages. The production formula should be reconciled to match the documentation exactly.
 
 ---
 
-## 5. Commands
+## 6. Commands
 
 ```bash
-# Install
+# Install Python package
 pip install -e ".[dev]"
 
 # Run tests (49 tests)
@@ -184,43 +226,83 @@ python scripts/validate_against_excel.py Munic_dashboard_LPU_1.xlsx
 # CLI analysis
 python scripts/run_analysis.py Munic_dashboard_LPU_1.xlsx --windows 12,18,24,30,36,42,48,54,60
 
-# Launch Streamlit dashboard
+# Start FastAPI backend (port 8001 -- avoids Windows zombie socket on 8000)
+uvicorn api.main:app --host 0.0.0.0 --port 8001 --reload
+
+# Start React frontend (dev)
+cd frontend && npm install && npm run dev
+
+# Build React frontend (production)
+cd frontend && npm run build
+
+# Legacy Streamlit dashboard
 streamlit run app/streamlit_app.py
 ```
 
 ---
 
-## 6. Files Modified Today (in order)
+## 7. Files Modified / Created (Chronological)
+
+### Phase 1: Core Package (Session 1)
 
 | File | Change |
 |------|--------|
-| `pyproject.toml` | Created — package config |
-| `src/lgd_model/config.py` | ModelConfig with ci_z_override, default 90% CI |
+| `pyproject.toml` | Created -- package config |
+| `src/lgd_model/config.py` | ModelConfig with ci_percentile, default 75th pctl |
 | `src/lgd_model/data_loader.py` | load_recovery_triangle, extract_balance_matrix |
 | `src/lgd_model/core_engine.py` | All chain-ladder math (unchanged from source) |
 | `src/lgd_model/vintage.py` | VintageDetail added, run_single_vintage returns (lgd, detail) tuple |
 | `src/lgd_model/statistics.py` | Normality tests |
-| `src/lgd_model/backtest.py` | CI formula: Forecast[0,t] + z*Std*sqrt(step/total), coverage stats |
+| `src/lgd_model/backtest.py` | CI formula: SEM-scaled with sqrt(N_steps/N_vintages), coverage stats |
 | `src/lgd_model/scenario.py` | max_tid=60 fixed, vintages aligned to reference window |
 | `src/lgd_model/export.py` | Excel export |
 | `src/lgd_model/dashboard.py` | HTML dashboard (10 charts) |
+
+### Phase 2: Streamlit Dashboard (Session 1)
+
+| File | Change |
+|------|--------|
 | `app/streamlit_app.py` | Single-page layout, z-override passthrough |
 | `app/components/sidebar.py` | CI level slider, z-override input, percentile display |
 | `app/components/backtest_tables.py` | Full backtest summary + per-TID CI blocks |
 | `app/components/triangle_viewer.py` | Vintage triangle inspection |
-| `tests/conftest.py` | Default config: normal_sem, 90% CI |
-| `tests/test_backtest.py` | 7 tests |
-| `tests/test_vintage.py` | 8 tests (including detail storage, hindsight) |
-| `tests/test_scenario.py` | 6 tests (including aligned vintages) |
-| `tests/test_validation.py` | 14 tests (machine precision checks) |
+
+### Phase 3: FastAPI + React Migration (Session 2+)
+
+| File | Change |
+|------|--------|
+| `api/main.py` | FastAPI app with CORS, routers, SPA serving |
+| `api/models.py` | Pydantic schemas for API request/response |
+| `api/routers/upload.py` | File upload endpoint |
+| `api/routers/analysis.py` | Analysis runner endpoint |
+| `api/routers/download.py` | Excel/HTML download endpoint |
+| `api/services/file_store.py` | Temporary file storage with expiry cleanup |
+| `api/services/job_manager.py` | Background job execution |
+| `api/services/chart_builder.py` | Server-side chart configuration |
+| `api/services/serializers.py` | NumPy to JSON serialization |
+| `frontend/package.json` | React 19 + Vite + TanStack + Plotly + Tailwind |
+| `frontend/src/App.tsx` | Main app component |
+| `frontend/src/plotly.d.ts` | Plotly ESM/CJS type declaration |
+| `frontend/src/pages/Dashboard.tsx` | Dashboard page |
+| `frontend/src/components/` | Cards, charts, tables, layout components |
+| `frontend/src/api/` | Axios API client |
+| `frontend/src/store/` | Zustand state management |
+
+### Phase 4: Documentation (Session 3)
+
+| File | Change |
+|------|--------|
+| `PROJECT_REQUIREMENTS.md` | Formal project requirements document |
+| `RFD_SESSION_SUMMARY.md` | Updated with FastAPI + React migration status |
 
 ---
 
-## 7. Resume Checklist for Next Session
+## 8. Resume Checklist for Next Session
 
-1. **Verify CI against user's current workbook** — upload the latest xlsx and compare upper/lower bounds at TID 23
-2. **Clarify CI level** — user wants 90% (z=1.64) but Excel has 50% (z=0.6745). Need to confirm which is the target for production
-3. **Lower bound formula** — same as upper but subtracted: `Forecast[0,t] - z*Std*sqrt(step/total)`. Verify against Excel lower bound section
-4. **Consider** whether the Mean/Std rows should use Forecast[0,:] or nanmean — currently Mean row = nanmean (matches Excel row 52), but CI blocks use Forecast[0,:] as the center
-5. **Optional**: implement git init, README, data/ directory convention
-6. **Optional**: add export of per-TID backtest tables to Excel
+1. **Fix Plotly chart rendering** -- resolve lazy-loading wrapper for all 10 chart types in the React frontend
+2. **Clean up chart factory** -- fix double-nested default export pattern in chart component modules
+3. **Reconcile CI formula** -- align `backtest.py` implementation with documentation spec (`sqrt(N_steps/N_vintages)` vs `sqrt(H_i/t)`)
+4. **Verify CI against user's current workbook** -- upload latest xlsx and compare upper/lower bounds
+5. **Push to GitHub** -- ensure https://github.com/henrye1/eskom_backtesting is up to date
+6. **Optional**: Production build and deployment configuration
+7. **Optional**: Add export of per-TID backtest tables to Excel download

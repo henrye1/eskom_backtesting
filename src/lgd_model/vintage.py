@@ -148,8 +148,8 @@ def run_single_vintage(
         if adjusted_max_tid < n_periods:
             window[i, max(0, adjusted_max_tid + 1):] = np.nan
 
-    recoveries = compute_aggregate_recoveries(window)
-    cum_bal = compute_cumulative_balances(window)
+    recoveries = compute_aggregate_recoveries(window, config.min_obs_window)
+    cum_bal = compute_cumulative_balances(window, config.min_obs_window)
     discount_mat = compute_discount_matrix(config.discount_rate, n_periods)
     lgd = compute_lgd_term_structure(recoveries, cum_bal, discount_mat, config.lgd_cap)
 

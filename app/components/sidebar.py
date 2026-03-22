@@ -21,7 +21,11 @@ def render_sidebar() -> dict:
         help="Upload Munic_dashboard_LPU_1.xlsx or compatible workbook.",
     )
 
-    st.sidebar.subheader("Window Sizes")
+    st.sidebar.subheader("Min Observation Windows")
+    st.sidebar.caption(
+        "Minimum cohorts per TID column in chain-ladder. "
+        "All scenarios use 60-cohort vintages."
+    )
     all_windows = [12, 18, 24, 30, 36, 42, 48, 54, 60]
     window_sizes = []
     cols = st.sidebar.columns(3)
