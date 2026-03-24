@@ -4,6 +4,7 @@ The vintage observation mask is the single most important correctness
 constraint. Each cohort's data is restricted to what would have been
 observable at the vintage date.
 """
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 

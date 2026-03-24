@@ -4,6 +4,7 @@ Lets the user pick any two min-observation windows and view their
 LGD term structures, residual profiles, CI bands, and key metrics
 together so they can make an informed calibration choice.
 """
+from __future__ import annotations
 
 import numpy as np
 import plotly.graph_objects as go

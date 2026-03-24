@@ -4,6 +4,7 @@ The diagonal pattern was reverse-engineered from the spreadsheet and
 empirically verified across all 22 vintages. Do NOT modify the
 start_tid / end_tid logic.
 """
+from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field

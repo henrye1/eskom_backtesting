@@ -6,6 +6,7 @@ Layout:
 9. Per-TID backtest blocks: for each TID column, transpose the Actual, Mean,
    Upper, Lower across vintages to show a stationary time series view.
 """
+from __future__ import annotations
 
 import numpy as np
 import pandas as pd
@@ -48,7 +49,7 @@ def render_backtest_summary(scenario: ScenarioResult) -> None:
     n_v = len(vr)
 
     hindsights = [v.hindsight for v in vr]
-    max_tid_show = n_v
+    max_tid_show = min(n_v, bt.forecast_matrix.shape[1] - 1)
 
     st.subheader(f"LGD Backtest Summary — {scenario.window_size}m Window")
     st.info(
@@ -58,18 +59,18 @@ def render_backtest_summary(scenario: ScenarioResult) -> None:
     )
 
     tbl_height = min(35 * n_v + 50, 600)
-    fmt5 = lambda df: {c: '{:.5f}' for c in df.columns if c.startswith('TID')}
+    fmt6 = lambda df: {c: '{:.6f}' for c in df.columns if c.startswith('TID')}
 
     # ── 1. FORECAST ──
     st.markdown("#### FORECAST LGD BY VINTAGE")
     fc_df = _matrix_to_df(bt.forecast_matrix, bt.vintage_labels, bt.periods, hindsights, max_tid_show)
-    st.dataframe(fc_df.style.format(fmt5(fc_df), na_rep=''),
+    st.dataframe(fc_df.style.format(fmt6(fc_df), na_rep=''),
                  use_container_width=True, hide_index=True, height=tbl_height)
 
     # ── 2. ACTUAL ──
     st.markdown("#### ACTUAL LGD BY VINTAGE (DIAGONAL)")
     ac_df = _matrix_to_df(bt.actual_matrix, bt.vintage_labels, bt.periods, hindsights, max_tid_show)
-    st.dataframe(ac_df.style.format(fmt5(ac_df), na_rep=''),
+    st.dataframe(ac_df.style.format(fmt6(ac_df), na_rep=''),
                  use_container_width=True, hide_index=True, height=tbl_height)
 
     # ── 3. Mean / Std ──
@@ -79,24 +80,24 @@ def render_backtest_summary(scenario: ScenarioResult) -> None:
     stats_df = pd.DataFrame([mean_row, std_row],
                             columns=[f"TID {t}" for t in range(len(mean_row))],
                             index=['Mean', 'Std Deviation'])
-    st.dataframe(stats_df.style.format('{:.5f}', na_rep=''), use_container_width=True)
+    st.dataframe(stats_df.style.format('{:.6f}', na_rep=''), use_container_width=True)
 
     # ── 4. MEAN LGD BY VINTAGE ──
     st.markdown("#### MEAN LGD BY VINTAGE")
     mean_df = _matrix_to_df(bt.mean_matrix, bt.vintage_labels, bt.periods, hindsights, max_tid_show)
-    st.dataframe(mean_df.style.format(fmt5(mean_df), na_rep=''),
+    st.dataframe(mean_df.style.format(fmt6(mean_df), na_rep=''),
                  use_container_width=True, hide_index=True, height=tbl_height)
 
     # ── 5. UPPER BOUND ──
     st.markdown(f"#### UPPER BOUND — SEM Scaled (z={bt.z_score}, pctl={bt.ci_percentile:.0%}, n={n_v})")
     upper_df = _matrix_to_df(bt.upper_ci, bt.vintage_labels, bt.periods, hindsights, max_tid_show)
-    st.dataframe(upper_df.style.format(fmt5(upper_df), na_rep=''),
+    st.dataframe(upper_df.style.format(fmt6(upper_df), na_rep=''),
                  use_container_width=True, hide_index=True, height=tbl_height)
 
     # ── 6. LOWER BOUND ──
     st.markdown(f"#### LOWER BOUND — SEM Scaled (z={bt.z_score}, pctl={bt.ci_percentile:.0%}, n={n_v})")
     lower_df = _matrix_to_df(bt.lower_ci, bt.vintage_labels, bt.periods, hindsights, max_tid_show)
-    st.dataframe(lower_df.style.format(fmt5(lower_df), na_rep=''),
+    st.dataframe(lower_df.style.format(fmt6(lower_df), na_rep=''),
                  use_container_width=True, hide_index=True, height=tbl_height)
 
     # ── 7. DIFFERENCE ──
@@ -111,7 +112,7 @@ def render_backtest_summary(scenario: ScenarioResult) -> None:
             'background-color: #ccffcc' if val < -0.05 else '')
 
     st.dataframe(
-        diff_df.style.format({c: '{:+.5f}' for c in tid_cols}, na_rep='')
+        diff_df.style.format({c: '{:+.6f}' for c in tid_cols}, na_rep='')
         .map(color_residuals, subset=tid_cols),
         use_container_width=True, hide_index=True, height=tbl_height)
 

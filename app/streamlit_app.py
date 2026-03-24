@@ -1,4 +1,4 @@
-"""Main Streamlit dashboard for the LGD Development Factor Model.
+"""Main Streamlit dashboard for the Municipal LGD Development Factor Model.
 
 Layout matches the Excel LGD Backtest Summary sheet:
 1. Backtest summary tables (Forecast, Actual, Difference, Normality tests)
@@ -6,6 +6,7 @@ Layout matches the Excel LGD Backtest Summary sheet:
 3. Scenario comparison across window sizes
 4. Charts
 """
+from __future__ import annotations
 
 import sys
 import os
@@ -33,12 +34,12 @@ from components.triangle_viewer import render_triangle_viewer
 from components.comparison import render_scenario_comparison
 
 st.set_page_config(
-    page_title="Development Factor LGD Backtesting",
+    page_title="Municipal LGD Backtesting",
     page_icon="📊",
     layout="wide",
 )
 
-st.title("Development Factor LGD Backtesting")
+st.title("Municipal LGD Backtesting")
 st.caption("IFRS 9 Loss Given Default estimation using development factors (chain-ladder)")
 
 
@@ -54,22 +55,30 @@ def _load_data(file_bytes: bytes, _file_hash: str):
         os.unlink(tmp_path)
 
 
-@st.cache_data(show_spinner="Running multi-scenario analysis...")
-def _run_scenarios_cached(
+def _run_scenarios_uncached(
     file_bytes: bytes,
     file_hash: str,
     window_sizes: tuple[int, ...],
     discount_rate: float,
     lgd_cap: float | None,
-    ci_percentile: float,
-    store_detail: bool,
+    ci_percentile: float = 0.75,
+    store_detail: bool = False,
     max_tid: int = 60,
+    window_size: int = 60,
 ) -> list[ScenarioResult]:
-    """Run multi-scenario analysis, cached on all parameters."""
+    """Run multi-scenario analysis."""
     master_df = _load_data(file_bytes, file_hash)
+
+    n_cohorts = len(master_df)
+    st.sidebar.info(
+        f"Data: {n_cohorts} cohorts, "
+        f"{master_df['Period'].min().strftime('%Y-%m')} to "
+        f"{master_df['Period'].max().strftime('%Y-%m')}"
+    )
+
     base_config = ModelConfig(
         discount_rate=discount_rate,
-        window_size=60,
+        window_size=window_size,
         max_tid=max_tid,
         lgd_cap=lgd_cap,
         ci_percentile=ci_percentile,
@@ -85,10 +94,10 @@ def _run_scenarios_cached(
     return scenarios
 
 
-# Render sidebar (no more "Run Analysis" button — auto-runs on parameter change)
+# Render sidebar
 params = render_sidebar()
 
-if params['uploaded_file'] is not None:
+if params['uploaded_file'] is not None and params['run_clicked']:
     file_bytes = params['uploaded_file'].getvalue()
     file_hash = hashlib.md5(file_bytes).hexdigest()
 
@@ -96,15 +105,25 @@ if params['uploaded_file'] is not None:
         st.error("Please select at least one window size.")
         st.stop()
 
-    scenarios = _run_scenarios_cached(
-        file_bytes=file_bytes,
-        file_hash=file_hash,
-        window_sizes=tuple(sorted(params['window_sizes'])),
-        discount_rate=params['discount_rate'],
-        lgd_cap=params['lgd_cap'],
-        ci_percentile=params['ci_percentile'],
-        store_detail=params['store_detail'],
+    # Add toggle for triangle detail storage
+    store_detail = st.sidebar.checkbox(
+        "Store triangle details (for inspection)",
+        value=True,
+        help="Enable to inspect balance matrices, recovery vectors, etc. per vintage.",
     )
+
+    with st.spinner("Running multi-scenario analysis..."):
+        scenarios = _run_scenarios_uncached(
+            file_bytes=file_bytes,
+            file_hash=file_hash,
+            window_sizes=tuple(sorted(params['window_sizes'])),
+            discount_rate=params['discount_rate'],
+            lgd_cap=params['lgd_cap'],
+            ci_percentile=params['ci_percentile'],
+            store_detail=store_detail,
+            max_tid=params['max_tid'],
+            window_size=params['window_size'],
+        )
 
     if not scenarios:
         st.error("No scenarios produced valid results. Check your data.")
@@ -113,74 +132,51 @@ if params['uploaded_file'] is not None:
     # KPI cards
     render_summary_cards(scenarios[0])
 
-    # ── Window selector with descriptive label ──
+    # -- Window selector (applies to all sections) --
     st.markdown("---")
-
-    best_window = scenarios[0].window_size
-
-    def _format_window(w: int) -> str:
-        parts = [f"{w}-month window"]
-        s = next((s for s in scenarios if s.window_size == w), None)
-        if s is not None:
-            parts.append(f"RMSE {s.rmse:.4f}")
-            parts.append(f"LGD₀ {s.latest_lgd_tid0:.4f}")
-        if w == 60:
-            parts.append("full")
-        if w == best_window:
-            parts.append("★ recommended")
-        return " | ".join(parts)
-
     sel_window = st.selectbox(
-        "Review window — select to inspect backtest details below",
+        "Select min-observation window",
         options=[s.window_size for s in scenarios],
         index=next(
-            (i for i, s in enumerate(scenarios) if s.window_size == 60),
+            (i for i, s in enumerate(scenarios) if s.window_size == params['window_size']),
             0,
         ),
-        format_func=_format_window,
+        format_func=lambda w: f"{w} months"
+            + (" (full)" if w == params['window_size'] else "")
+            + (" (recommended)" if w == scenarios[0].window_size else ""),
     )
     sel_scenario = next(
         (s for s in scenarios if s.window_size == sel_window),
         scenarios[0],
     )
 
-    # ── Active selection banner ──
-    st.info(
-        f"**Reviewing: {sel_window}-month window** — "
-        f"{sel_scenario.n_vintages} vintages, "
-        f"{sel_scenario.n_residuals} residuals, "
-        f"RMSE {sel_scenario.rmse:.4f}, "
-        f"MAE {sel_scenario.mae:.4f}, "
-        f"Bias {sel_scenario.mean_error:+.4f}"
-    )
-
-    # ── 1. Full Backtest Summary (all tables + per-vintage CI blocks) ──
+    # -- 1. Full Backtest Summary (all tables + per-vintage CI blocks) --
     render_backtest_summary(sel_scenario)
 
-    # ── 2. Scenario Comparison ──
+    # -- 2. Scenario Comparison --
     st.markdown("---")
-    st.subheader("Scenario Comparison — All Min-Observation Windows")
+    st.subheader("Scenario Comparison -- All Min-Observation Windows")
     st.caption(
-        "All scenarios use 60-cohort vintages (23 vintages). "
+        f"All scenarios use {params['window_size']}-cohort vintages. "
         "Min-obs window controls cohort restriction per TID. "
         "Ranked by composite score (lower = better)."
     )
     render_scenario_table(scenarios)
 
-    # ── 3. Scenario Comparison (pick any two) ──
+    # -- 3. Scenario Comparison (pick any two) --
     if len(scenarios) >= 2:
         st.markdown("---")
         render_scenario_comparison(scenarios)
 
-    # ── 4. Charts ──
+    # -- 4. Charts --
     st.markdown("---")
     render_all_charts(scenarios, selected_window=sel_window)
 
-    # ── 5. Triangle Inspection ──
+    # -- 5. Triangle Inspection --
     st.markdown("---")
     render_triangle_viewer(sel_scenario)
 
-    # ── 6. Downloads ──
+    # -- 6. Downloads --
     st.markdown("---")
     st.subheader("Downloads")
     col1, col2, col3 = st.columns(3)
@@ -204,7 +200,6 @@ if params['uploaded_file'] is not None:
             options=[s.window_size for s in scenarios],
             index=0,
             key="dl_window",
-            format_func=lambda w: f"{w}-month window",
         )
         dl_scenario = next(
             (s for s in scenarios if s.window_size == dl_window),
@@ -214,7 +209,7 @@ if params['uploaded_file'] is not None:
         config = ModelConfig(
             discount_rate=params['discount_rate'],
             window_size=dl_window,
-            max_tid=60,
+            max_tid=params['max_tid'],
             lgd_cap=params['lgd_cap'],
             ci_percentile=params['ci_percentile'],
         )
@@ -244,5 +239,7 @@ if params['uploaded_file'] is not None:
             mime="text/html",
         )
 
+elif params['uploaded_file'] is None:
+    st.info("Upload an Excel workbook and click **Run Analysis** to begin.")
 else:
-    st.info("Upload an Excel workbook to begin. Analysis runs automatically.")
+    st.info("Click **Run Analysis** to start the computation.")

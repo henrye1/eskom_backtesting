@@ -1,4 +1,5 @@
 """Excel export functions for LGD model results."""
+from __future__ import annotations
 
 import numpy as np
 import pandas as pd

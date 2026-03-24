@@ -1,4 +1,5 @@
 """Sidebar parameter controls for the Streamlit dashboard."""
+from __future__ import annotations
 
 from scipy import stats
 import streamlit as st
@@ -11,20 +12,46 @@ def render_sidebar() -> dict:
     -------
     dict
         Keys: uploaded_file, window_sizes, ci_percentile,
-        discount_rate, lgd_cap, store_detail.
+        discount_rate, lgd_cap, run_clicked, window_size, max_tid.
     """
     st.sidebar.header("Model Parameters")
 
     uploaded_file = st.sidebar.file_uploader(
         "Upload Excel Workbook",
         type=["xlsx"],
-        help="Upload Munic_dashboard_LPU_1.xlsx or compatible workbook.",
+        help="Upload a municipal RR LGD term structure workbook (.xlsx).",
+    )
+
+    st.sidebar.subheader("Vintage Window Size")
+    st.sidebar.caption(
+        "Number of cohorts in each rolling vintage window."
+    )
+    window_size = st.sidebar.number_input(
+        "Vintage window (cohorts)",
+        min_value=12,
+        max_value=200,
+        value=60,
+        step=6,
+        help="Rolling window of cohorts per vintage. Default 60.",
+    )
+
+    st.sidebar.subheader("Max TID")
+    st.sidebar.caption(
+        "Maximum time-in-default periods to analyse."
+    )
+    max_tid = st.sidebar.number_input(
+        "Max TID periods",
+        min_value=12,
+        max_value=200,
+        value=60,
+        step=6,
+        help="Limits TID columns used in analysis. Default 60.",
     )
 
     st.sidebar.subheader("Min Observation Windows")
     st.sidebar.caption(
         "Minimum cohorts per TID column in chain-ladder. "
-        "All scenarios use 60-cohort vintages."
+        "All scenarios use the same vintage window size."
     )
     all_windows = [12, 18, 24, 30, 36, 42, 48, 54, 60]
     window_sizes = []
@@ -47,7 +74,7 @@ def render_sidebar() -> dict:
 
     z_display = round(stats.norm.ppf(ci_percentile), 4)
     st.sidebar.caption(
-        f"z = {z_display} | Bands widen with term point via √(N_steps / N_vintages)"
+        f"z = {z_display} | Bands widen with term point via sqrt(N_steps / N_vintages)"
     )
 
     st.sidebar.subheader("Model Settings")
@@ -62,11 +89,8 @@ def render_sidebar() -> dict:
 
     lgd_cap = st.sidebar.checkbox("Cap LGD at 1.0", value=False)
 
-    store_detail = st.sidebar.checkbox(
-        "Store triangle details (for inspection)",
-        value=True,
-        help="Enable to inspect balance matrices, recovery vectors, etc. per vintage.",
-    )
+    st.sidebar.markdown("---")
+    run_clicked = st.sidebar.button("Run Analysis", type="primary")
 
     return {
         'uploaded_file': uploaded_file,
@@ -74,5 +98,7 @@ def render_sidebar() -> dict:
         'ci_percentile': ci_percentile,
         'discount_rate': discount_rate,
         'lgd_cap': 1.0 if lgd_cap else None,
-        'store_detail': store_detail,
+        'run_clicked': run_clicked,
+        'window_size': window_size,
+        'max_tid': max_tid,
     }

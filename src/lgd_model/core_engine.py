@@ -6,6 +6,7 @@ cumulative balances, discount matrix, and LGD term structure.
 WARNING: Do NOT modify the formulas — they have been validated to
 machine precision against the client's Excel workbook.
 """
+from __future__ import annotations
 
 import numpy as np
 

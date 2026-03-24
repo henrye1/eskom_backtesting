@@ -7,6 +7,7 @@ Displays the same data as the Excel vintage calculation sheets:
 4. Discount factor matrix
 5. LGD term structure
 """
+from __future__ import annotations
 
 import numpy as np
 import pandas as pd
@@ -88,34 +89,22 @@ def render_triangle_viewer(scenario: ScenarioResult) -> None:
         "LGD Term Structure",
     ])
 
-    # ── Normalize toggle (shared across Balance, Recovery, CumBal tabs) ──
-    show_pct = st.checkbox(
-        "Show as % of EAD (normalised)",
-        value=True,
-        help="Divide balances by aggregate EAD so TID_0 ≈ 1.0. "
-             "Uncheck to see raw Rand amounts.",
-    )
-    total_ead = float(np.nansum(detail.cohort_eads))
-
     # Tab 1: Balance Matrix (after observation mask)
     with tabs[0]:
+        st.markdown(f"**Balance Matrix** — {n_cohorts} cohorts x {n_periods} periods")
+        st.caption("NaN = data not available at this vintage date (observation mask applied)")
+
+        # Build cohort info table
         bm = detail.balance_matrix
+        cohort_info = pd.DataFrame({
+            'Cohort': range(n_cohorts),
+            'Adj MAXIF': detail.adjusted_max_tids,
+            'EAD': detail.cohort_eads,
+        })
 
-        if show_pct:
-            st.markdown(f"**Balance Matrix (% of EAD)** — {n_cohorts} cohorts x {n_periods} periods")
-            st.caption("Each row divided by its own EAD. TID_0 = 1.0 (100%). NaN = unobserved.")
-            eads_col = detail.cohort_eads.copy()
-            eads_col[eads_col == 0] = np.nan
-            bm_display = bm / eads_col[:, None]
-            fmt_tid = {c: '{:.5f}' for c in [f"TID_{c}" for c in range(n_periods)]}
-        else:
-            st.markdown(f"**Balance Matrix (Rand)** — {n_cohorts} cohorts x {n_periods} periods")
-            st.caption("NaN = data not available at this vintage date (observation mask applied)")
-            bm_display = bm
-            fmt_tid = {c: '{:,.2f}' for c in [f"TID_{c}" for c in range(n_periods)]}
-
+        # Show balance matrix with cohort labels
         bm_df = pd.DataFrame(
-            bm_display,
+            bm,
             columns=[f"TID_{c}" for c in range(n_periods)],
         )
         bm_df.insert(0, 'EAD', detail.cohort_eads)
@@ -123,7 +112,10 @@ def render_triangle_viewer(scenario: ScenarioResult) -> None:
         bm_df.insert(0, 'Cohort', range(n_cohorts))
 
         st.dataframe(
-            bm_df.style.format(fmt_tid, na_rep='').format({'EAD': '{:,.2f}'}),
+            bm_df.style.format(
+                {c: '{:,.2f}' for c in bm_df.columns if c.startswith('TID_')},
+                na_rep='',
+            ).format({'EAD': '{:,.2f}'}),
             use_container_width=True,
             hide_index=True,
             height=min(35 * n_cohorts + 50, 500),
@@ -131,37 +123,26 @@ def render_triangle_viewer(scenario: ScenarioResult) -> None:
 
     # Tab 2: Aggregate Recovery vector
     with tabs[1]:
-        if show_pct:
-            st.markdown(f"**Aggregate Recovery Vector (% of total EAD)** — {n_periods} periods")
-            rec_vals = detail.recoveries / total_ead if total_ead else detail.recoveries
-            rec_fmt = '{:.5f}'
-        else:
-            st.markdown(f"**Aggregate Recovery Vector (Rand)** — {n_periods} periods")
-            rec_vals = detail.recoveries
-            rec_fmt = '{:,.4f}'
+        st.markdown(f"**Aggregate Recovery Vector** — {n_periods} periods")
         rec_df = pd.DataFrame({
             'TID': range(n_periods),
-            'Recovery': rec_vals,
+            'Recovery': detail.recoveries,
         })
         st.dataframe(
-            rec_df.style.format({'Recovery': rec_fmt}),
+            rec_df.style.format({'Recovery': '{:,.4f}'}),
             use_container_width=True,
             hide_index=True,
         )
 
     # Tab 3: Cumulative Balance matrix
     with tabs[2]:
-        if show_pct:
-            st.markdown(f"**Cumulative Balance Matrix (% of total EAD)** — {n_periods} x {n_periods}")
-            cb_display = detail.cum_bal / total_ead if total_ead else detail.cum_bal
-            cb_fmt = {c: '{:.5f}' for c in [f"TID {c}" for c in range(n_periods)]}
-        else:
-            st.markdown(f"**Cumulative Balance Matrix (Rand)** — {n_periods} x {n_periods}")
-            cb_display = detail.cum_bal
-            cb_fmt = {c: '{:,.2f}' for c in [f"TID {c}" for c in range(n_periods)]}
-        cb_df = _format_matrix_df(cb_display, row_labels=[str(r) for r in range(n_periods)])
+        st.markdown(f"**Cumulative Balance Matrix** — {n_periods} x {n_periods}")
+        cb_df = _format_matrix_df(detail.cum_bal, row_labels=[str(r) for r in range(n_periods)])
         st.dataframe(
-            cb_df.style.format(cb_fmt, na_rep=''),
+            cb_df.style.format(
+                {c: '{:,.2f}' for c in cb_df.columns if c.startswith('TID')},
+                na_rep='',
+            ),
             use_container_width=True,
             hide_index=True,
             height=min(35 * n_periods + 50, 500),
@@ -173,7 +154,7 @@ def render_triangle_viewer(scenario: ScenarioResult) -> None:
         dm_df = _format_matrix_df(detail.discount_matrix, row_labels=[str(r) for r in range(n_periods)])
         st.dataframe(
             dm_df.style.format(
-                {c: '{:.5f}' for c in dm_df.columns if c.startswith('TID')},
+                {c: '{:.6f}' for c in dm_df.columns if c.startswith('TID')},
                 na_rep='',
             ),
             use_container_width=True,
@@ -191,7 +172,7 @@ def render_triangle_viewer(scenario: ScenarioResult) -> None:
             'Recovery Rate': 1.0 - vr.lgd_term_structure[:max_show],
         })
         st.dataframe(
-            lgd_df.style.format({'LGD': '{:.5f}', 'Recovery Rate': '{:.5f}'}),
+            lgd_df.style.format({'LGD': '{:.6f}', 'Recovery Rate': '{:.6f}'}),
             use_container_width=True,
             hide_index=True,
         )

@@ -6,6 +6,7 @@ controls how many cohorts are used per TID column in the chain-ladder
 calculations — a sliding window that shifts backward for higher TIDs.
 This decouples the forecast horizon from the calibration depth.
 """
+from __future__ import annotations
 
 from dataclasses import dataclass
 

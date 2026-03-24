@@ -1,4 +1,5 @@
 """Configuration dataclass for the LGD Development Factor Model."""
+from __future__ import annotations
 
 from dataclasses import dataclass
 
@@ -18,11 +19,11 @@ class ModelConfig:
     lgd_cap : float or None
         Set to 1.0 to cap LGD at 100%; None = uncapped.
     ci_percentile : float
-        Confidence percentile for SEM CI bands (e.g. 0.75 → z ≈ 0.6745).
+        Confidence percentile for SEM CI bands (e.g. 0.75 -> z ~ 0.6745).
         The z-value is derived dynamically via norm.ppf(ci_percentile).
         Default 0.75 (75th percentile).
     min_obs_window : int or None
-        Minimum observation window — the minimum number of cohorts used
+        Minimum observation window -- the minimum number of cohorts used
         per TID column in recovery and cumulative balance calculations.
         When set, a sliding window of this size shifts backward across
         TID columns: at TID 0 the most recent min_obs_window cohorts

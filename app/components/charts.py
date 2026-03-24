@@ -2,6 +2,7 @@
 
 All 10 charts from the static dashboard, rendered with st.plotly_chart.
 """
+from __future__ import annotations
 
 import numpy as np
 import plotly.express as px

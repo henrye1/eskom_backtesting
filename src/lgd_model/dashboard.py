@@ -3,6 +3,7 @@
 Generates a standalone HTML file with 10 charts covering LGD term
 structures, backtest diagnostics, and multi-scenario comparisons.
 """
+from __future__ import annotations
 
 import numpy as np
 import pandas as pd

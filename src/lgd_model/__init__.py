@@ -1,4 +1,5 @@
-"""LGD Development Factor Model — Eskom Municipal Debt."""
+"""LGD Development Factor Model -- Municipal Debt."""
+from __future__ import annotations
 
 from lgd_model.config import ModelConfig
 from lgd_model.data_loader import load_recovery_triangle, extract_balance_matrix
