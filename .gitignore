@@ -21,12 +21,7 @@ ENV/
 
 # Data files
 data/*.xlsx
-*.xlsx
 
-# Output
-LGD_Dashboard.html
-LGD_Model_Output.xlsx
-LGD_Multi_Scenario_Output.xlsx
 
 # OS
 .DS_Store
