@@ -1,14 +1,15 @@
-# RFD -- Eskom LGD Backtesting Project Session Summary
-**Date**: 2026-03-22 (updated)
+# RFD -- LGD Development Factor Backtesting Framework — Session Summary
+**Date**: 2026-03-24 (updated)
 **Client**: Anchor Point Risk (Pty) Ltd
-**Entity**: Eskom -- Non-Metro Municipal Debt
+**Framework**: Generic LGD Development Factor Backtesting (portfolio-agnostic)
+**Reference Entity**: Eskom (Non-Metro Municipalities, RR basis)
 **Repository**: https://github.com/henrye1/eskom_backtesting
 
 ---
 
 ## 1. What Was Built
 
-Refactored the validated monolithic script `lgd_development_factor_model.py` (1,178 lines) into a clean modular Python package. The application has been migrated from Streamlit to a **FastAPI + React** architecture with a TypeScript frontend.
+Refactored the validated monolithic script `lgd_development_factor_model.py` (1,178 lines) into a clean modular Python package implementing a generic IFRS 9 LGD development factor backtesting framework. The framework is portfolio-agnostic — it applies to any credit exposure that produces a recovery triangle. The application provides both a Streamlit dashboard and a **FastAPI + React** architecture with a TypeScript frontend.
 
 ### Project Structure
 ```
@@ -177,9 +178,9 @@ The `plotly.js-dist-min` package ships as CommonJS while the frontend uses ES mo
 
 ---
 
-## 4. Streamlit Dashboard Layout (Legacy)
+## 4. Streamlit Dashboard Layout
 
-The legacy Streamlit dashboard remains functional at `streamlit run app/streamlit_app.py`. Single-page scrollable layout with:
+The Streamlit dashboard is the primary interactive UI at `streamlit run app/streamlit_app.py`. Single-page scrollable layout with:
 
 1. **KPI Cards** -- Recommended Window, RMSE, MAE, Bias, LGD at TID=0
 2. **Window Selector** -- one dropdown controls all sections
@@ -188,7 +189,11 @@ The legacy Streamlit dashboard remains functional at `streamlit run app/streamli
 5. **Scenario Comparison** -- all windows ranked by composite score
 6. **Charts** -- 10 Plotly charts
 7. **Triangle Inspection** -- per-vintage balance matrix, recovery, cumbal, discount, LGD
-8. **Downloads** -- Multi-scenario Excel, single-window Excel, HTML dashboard
+8. **Downloads**:
+   - **Full Audit Trail Workbooks** -- per-window workbook replicating the reference spreadsheet structure (balance triangles, recovery vectors, cumbal, discount, LGD components per vintage). Single-window or all-windows ZIP
+   - **Summary Exports** -- Multi-scenario Excel, single-window Excel, HTML dashboard
+
+All exports regenerate automatically from fresh analysis results when new data is uploaded.
 
 ---
 
@@ -255,7 +260,7 @@ streamlit run app/streamlit_app.py
 | `src/lgd_model/statistics.py` | Normality tests |
 | `src/lgd_model/backtest.py` | CI formula: SEM-scaled with sqrt(N_steps/N_vintages), coverage stats |
 | `src/lgd_model/scenario.py` | max_tid=60 fixed, vintages aligned to reference window |
-| `src/lgd_model/export.py` | Excel export |
+| `src/lgd_model/export.py` | Excel export (summary + full audit trail workbooks) |
 | `src/lgd_model/dashboard.py` | HTML dashboard (10 charts) |
 
 ### Phase 2: Streamlit Dashboard (Session 1)
@@ -294,6 +299,18 @@ streamlit run app/streamlit_app.py
 |------|--------|
 | `PROJECT_REQUIREMENTS.md` | Formal project requirements document |
 | `RFD_SESSION_SUMMARY.md` | Updated with FastAPI + React migration status |
+
+### Phase 5: Full Audit Trail Export + Documentation Refresh (Session 4)
+
+| File | Change |
+|------|--------|
+| `src/lgd_model/export.py` | Added `export_full_audit_workbook()` and `export_all_audit_workbooks_zip()` — generates per-window workbooks replicating reference spreadsheet structure with all intermediate calculations per vintage |
+| `app/streamlit_app.py` | Added full audit trail download section (single-window + all-windows ZIP) to Downloads area |
+| `LGD_Development_Factor_Model_Documentation.md` | Genericised framework (removed portfolio-specific language), added audit trail export section |
+| `PROJECT_REQUIREMENTS.md` | Genericised scope, added FR-48a/b/c for audit trail export, updated output formats and acceptance criteria |
+| `RFD_SESSION_SUMMARY.md` | Updated with audit trail export feature and documentation refresh |
+
+**Key design decision**: The documentation now positions this as a generic development factor framework applicable to any recovery triangle, not specific to any portfolio or segment. Eskom non-metro municipal data is the reference validation dataset.
 
 ---
 

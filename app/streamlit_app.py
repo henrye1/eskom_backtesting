@@ -21,7 +21,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from lgd_model.config import ModelConfig
 from lgd_model.data_loader import load_recovery_triangle
 from lgd_model.scenario import run_scenario, ScenarioResult
-from lgd_model.export import export_results_to_excel, export_multi_scenario_excel
+from lgd_model.export import (
+    export_results_to_excel,
+    export_multi_scenario_excel,
+    export_full_audit_workbook,
+    export_all_audit_workbooks_zip,
+)
 from lgd_model.dashboard import generate_dashboard
 
 from components.sidebar import render_sidebar
@@ -183,6 +188,70 @@ if params['uploaded_file'] is not None:
     # ── 6. Downloads ──
     st.markdown("---")
     st.subheader("Downloads")
+
+    # Build shared config for exports
+    export_config = ModelConfig(
+        discount_rate=params['discount_rate'],
+        window_size=60,
+        max_tid=60,
+        lgd_cap=params['lgd_cap'],
+        ci_percentile=params['ci_percentile'],
+    )
+
+    # Load master_df for full audit workbooks
+    master_df = _load_data(file_bytes, file_hash)
+
+    # ── Row 1: Full audit trail workbooks ──
+    st.markdown("#### Full Audit Trail Workbooks")
+    st.caption(
+        "Replicates the reference workbook structure per window — "
+        "balance triangles, recovery vectors, cumulative balances, "
+        "discount matrices, and LGD component matrices for every vintage. "
+        "Use these to verify formulas and tie results back to the UI."
+    )
+
+    col_a1, col_a2 = st.columns(2)
+
+    with col_a1:
+        dl_audit_window = st.selectbox(
+            "Window for full audit workbook",
+            options=[s.window_size for s in scenarios],
+            index=next(
+                (i for i, s in enumerate(scenarios) if s.window_size == 60),
+                0,
+            ),
+            key="dl_audit_window",
+            format_func=lambda w: f"{w}-month window",
+        )
+        dl_audit_scenario = next(
+            (s for s in scenarios if s.window_size == dl_audit_window),
+            scenarios[0],
+        )
+        audit_bytes = export_full_audit_workbook(
+            master_df, dl_audit_scenario, export_config,
+        )
+        st.download_button(
+            f"Download {dl_audit_window}m Full Audit Workbook",
+            data=audit_bytes,
+            file_name=f"Munic_dashboard_LPU_1_{dl_audit_window}m.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    with col_a2:
+        st.markdown("&nbsp;")  # spacer
+        st.markdown("&nbsp;")
+        zip_bytes = export_all_audit_workbooks_zip(
+            master_df, scenarios, export_config,
+        )
+        st.download_button(
+            "Download All Audit Workbooks (ZIP)",
+            data=zip_bytes,
+            file_name="LGD_Audit_Workbooks_All_Windows.zip",
+            mime="application/zip",
+        )
+
+    # ── Row 2: Summary exports + HTML ──
+    st.markdown("#### Summary Exports")
     col1, col2, col3 = st.columns(3)
 
     with col1:
@@ -211,15 +280,8 @@ if params['uploaded_file'] is not None:
             scenarios[0],
         )
         tmp_path = tempfile.mktemp(suffix='.xlsx')
-        config = ModelConfig(
-            discount_rate=params['discount_rate'],
-            window_size=dl_window,
-            max_tid=60,
-            lgd_cap=params['lgd_cap'],
-            ci_percentile=params['ci_percentile'],
-        )
         export_results_to_excel(
-            dl_scenario.vintage_results, dl_scenario.backtest, config, tmp_path
+            dl_scenario.vintage_results, dl_scenario.backtest, export_config, tmp_path
         )
         with open(tmp_path, 'rb') as f:
             data = f.read()

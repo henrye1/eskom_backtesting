@@ -1,9 +1,9 @@
-# PROJECT REQUIREMENTS — Eskom LGD Backtesting
+# PROJECT REQUIREMENTS — LGD Development Factor Backtesting Framework
 
-**Document Version:** 1.0
-**Date:** 2026-03-22
+**Document Version:** 1.1
+**Date:** 2026-03-24
 **Client:** Anchor Point Risk (Pty) Ltd (`henry@anchorpointrisk.co.za`)
-**Entity:** Eskom -- Non-Metro Municipal Debt
+**Reference Entity:** Eskom (Non-Metro Municipalities, RR basis)
 **Repository:** https://github.com/henrye1/eskom_backtesting
 
 ---
@@ -12,21 +12,22 @@
 
 ### 1.1 Objective
 
-Build a production-grade Python application that implements an IFRS 9 Loss Given Default (LGD) Development Factor Model for Eskom municipal debt. The system uses the chain-ladder (development factor) method to estimate LGD term structures from monthly default cohort recovery data, then backtests forecasts against actuals across rolling vintage windows.
+Build a production-grade Python application that implements a generic IFRS 9 Loss Given Default (LGD) Development Factor Backtesting Framework. The system uses the chain-ladder (development factor) method to estimate LGD term structures from monthly default cohort recovery data, then backtests forecasts against actuals across rolling vintage windows. The framework is portfolio-agnostic — it applies to any credit exposure that produces a recovery triangle.
 
 ### 1.2 Background
 
-The model was originally implemented as a monolithic Python script (`lgd_development_factor_model.py`, 1,178 lines) which has been validated to machine precision against the client's Excel workbook (`Munic_dashboard_LPU_1.xlsx`). All 276 residuals at the 60-month window match to `max_abs_diff = 0.0` (within floating-point epsilon). The project refactors this script into a modular Python package, exposes it via a FastAPI REST API, and provides a React + TypeScript frontend dashboard.
+The framework was originally implemented as a monolithic Python script (`lgd_development_factor_model.py`, 1,178 lines) validated to machine precision against the client's Excel workbook (`Munic_dashboard_LPU_1.xlsx`). All 276 residuals at the 60-month window match to `max_abs_diff = 0.0` (within floating-point epsilon). The project refactors this script into a modular Python package, exposes it via a FastAPI REST API, and provides both a Streamlit dashboard and a React + TypeScript frontend.
 
 ### 1.3 Scope
 
-- Non-metro municipal receivables on a Recognise Revenue (accrual) accounting basis
-- Monthly default cohorts from March 2019 to December 2025 (82 cohorts at time of validation)
+- Generic development factor framework applicable to any recovery triangle input
+- Reference validation dataset: Eskom non-metro municipal receivables (82 monthly cohorts, March 2019 to December 2025)
 - Rolling-window vintage analysis with configurable window sizes (12 to 60 months)
 - Multi-scenario comparison ranking windows by composite backtesting score
 - Interactive dashboard with charts, tables, and Excel/HTML export
+- Full audit trail workbook generation replicating the reference spreadsheet structure
 
-Out of scope: forward-looking macroeconomic adjustments, downturn LGD overlays, cure-rate analysis, metropolitan municipalities, cash-basis accounting.
+Out of scope: forward-looking macroeconomic adjustments, downturn LGD overlays, cure-rate analysis. These are addressed elsewhere in the IFRS 9 framework and can be applied as overlays to the development factor output.
 
 ---
 
@@ -128,7 +129,10 @@ The CI formula uses the Standard Error of the Mean (SEM) with a term-point scali
 | FR-44 | Multi-scenario Excel export: one sheet per scenario with LGD term structures, backtest results, and metrics. |
 | FR-45 | Single-window Excel export: detailed backtest tables for the selected window. |
 | FR-46 | Static HTML dashboard export (Plotly-based, 10 charts). |
-| FR-47 | Downloads served via API endpoints with proper content-type headers. |
+| FR-47 | Downloads served via API endpoints and Streamlit UI with proper content-type headers. |
+| FR-48a | **Full audit trail workbook export**: per-window workbook replicating the reference spreadsheet structure — master data, per-vintage calculation sheets (balance triangle, recovery vector, cumulative balance matrix, discount matrix, LGD component matrix), LGD term structure summary, and LGD backtest summary. |
+| FR-48b | **Bulk audit trail export**: ZIP download containing full audit trail workbooks for all selected window sizes. |
+| FR-48c | **Auto-refresh on new data**: when new data is uploaded, all exports (including audit trail workbooks) are regenerated from the fresh analysis results — workbooks are never stale copies from disk. |
 
 ### 2.10 Configuration
 
@@ -227,7 +231,7 @@ The core computation package is a pure Python library with no web dependencies. 
 | `backtest.py` | Forecast vs actual comparison, diagonal pattern, CI computation |
 | `statistics.py` | Jarque-Bera and Chi-Square normality tests |
 | `scenario.py` | Multi-window runner, composite scoring, ranking |
-| `export.py` | Excel workbook generation |
+| `export.py` | Excel workbook generation (summary exports + full audit trail workbooks) |
 | `dashboard.py` | Static Plotly HTML dashboard |
 
 ### 4.3 FastAPI API Layer (`api/`)
@@ -287,7 +291,9 @@ The original Streamlit dashboard remains in the codebase for backward compatibil
 ### 5.2 Output Formats
 
 - **JSON** (via API): Serialized analysis results including LGD term structures, backtest matrices, metrics, chart configurations
-- **Excel** (.xlsx): Multi-sheet workbook with per-scenario results, backtest tables, summary statistics
+- **Excel — Summary** (.xlsx): Multi-sheet workbook with per-scenario results, backtest tables, summary statistics
+- **Excel — Full Audit Trail** (.xlsx): Per-window workbook replicating the reference spreadsheet structure with all intermediate calculations per vintage (balance triangle, recovery, cumbal, discount, LGD components). Allows the user to verify formulas and tie results back to the UI
+- **Excel — Bulk Audit Trail** (.zip): ZIP containing audit trail workbooks for all selected windows
 - **HTML**: Static Plotly dashboard with 10 interactive charts
 
 ---
@@ -433,6 +439,8 @@ python scripts/validate_against_excel.py data/Munic_dashboard_LPU_1.xlsx
 | AC-08 | React frontend renders KPI cards, scenario table, and 10 Plotly charts | IN PROGRESS |
 | AC-09 | Plotly charts render correctly (ESM/CJS interop resolved) | IN PROGRESS |
 | AC-10 | Frontend sidebar exposes all configurable parameters | PASS |
+| AC-11 | Full audit trail workbooks replicate reference spreadsheet structure per window | PASS |
+| AC-12 | Audit trail workbooks regenerate automatically when new data is uploaded | PASS |
 
 ---
 

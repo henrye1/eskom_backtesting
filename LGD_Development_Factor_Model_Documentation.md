@@ -1,8 +1,8 @@
 # LGD Development Factor Model — Technical Documentation
 
-**Entity:** Eskom Municipal Debt (Non-Metro Municipalities)
 **Model Type:** IFRS 9 Loss Given Default — Development Factor (Chain-Ladder)
-**Revenue Basis:** Recognise Revenue (RR)
+**Framework:** Generic — applicable to any portfolio with a recovery triangle
+**Reference Entity:** Eskom (Non-Metro Municipalities, Recognise Revenue basis)
 **Author:** Anchor Point Risk (Pty) Ltd
 **Document Date:** March 2026
 
@@ -10,17 +10,17 @@
 
 ## 1. Executive Summary
 
-This document describes the Loss Given Default (LGD) development factor model used to estimate expected credit losses on Eskom's municipal receivables under IFRS 9. The model constructs a recovery triangle from 82 monthly default cohorts spanning March 2019 to December 2025, applies the chain-ladder (development factor) methodology to project future recoveries, and discounts them at a 15% annual rate to arrive at a present-value LGD term structure indexed by months in default.
+This document describes a generic Loss Given Default (LGD) development factor framework for estimating expected credit losses under IFRS 9. The framework constructs a recovery triangle from monthly default cohorts, applies the chain-ladder (development factor) methodology to project future recoveries, and discounts them at a configurable annual rate to arrive at a present-value LGD term structure indexed by months in default.
 
-The model produces a set of LGD values ranging from approximately 29% at the point of default (TID 0) to near 100% for exposures that have been in default for more than 40 months. A rolling-window backtest across 23 vintage periods confirms that the model produces unbiased forecasts (mean residual = 0.70%) with moderate dispersion (σ = 9.4%). Residual normality is rejected by both Jarque-Bera and Chi-Square tests, indicating the presence of heavier-than-normal tails, which has implications for confidence interval construction.
+The framework is not specific to any particular portfolio or segment — it can be applied to any credit exposure that produces a recovery triangle (rows = default cohorts, columns = months-since-default, cells = outstanding balances). The reference implementation uses Eskom non-metro municipal receivable data (82 monthly cohorts, March 2019 to December 2025) as the validation dataset, producing LGD values ranging from approximately 29% at the point of default (TID 0) to near 100% for exposures in default for more than 40 months. A rolling-window backtest across 23 vintage periods confirms unbiased forecasts (mean residual = 0.70%) with moderate dispersion (σ = 9.4%). Residual normality is rejected by both Jarque-Bera and Chi-Square tests, indicating heavier-than-normal tails with implications for confidence interval construction.
 
 ---
 
 ## 2. Model Purpose and Scope
 
-The model serves two primary purposes. First, it provides a term structure of LGD estimates conditioned on the number of months an exposure has been in default, supporting the calculation of lifetime expected credit losses under IFRS 9 paragraph 5.5.3. Second, it provides a backtesting framework to validate that the development factor projections are consistent with subsequently observed recovery outcomes.
+The framework serves two primary purposes. First, it provides a term structure of LGD estimates conditioned on the number of months an exposure has been in default, supporting the calculation of lifetime expected credit losses under IFRS 9 paragraph 5.5.3. Second, it provides a backtesting framework to validate that the development factor projections are consistent with subsequently observed recovery outcomes.
 
-The scope is limited to non-metro municipal receivables on a Recognise Revenue (accrual) accounting basis. Separate models exist for Cash Basis accounting and for metropolitan municipalities. The model does not incorporate forward-looking macroeconomic adjustments, downturn LGD overlays, or cure-rate analysis — these are addressed elsewhere in the IFRS 9 framework.
+The development factor methodology is portfolio-agnostic — the same chain-ladder engine, vintage analysis, and backtesting framework apply regardless of the underlying asset class, provided the input data is structured as a recovery triangle. The framework does not incorporate forward-looking macroeconomic adjustments, downturn LGD overlays, or cure-rate analysis — these are addressed elsewhere in the IFRS 9 framework and can be applied as overlays to the development factor output.
 
 ---
 
@@ -28,13 +28,13 @@ The scope is limited to non-metro municipal receivables on a Recognise Revenue (
 
 ### 3.1 Master Recovery Triangle
 
-The foundation of the model is a recovery triangle stored in the "RR LGD TERM STRUCTURE ALL" sheet. This contains 82 monthly default cohorts (rows) observed across up to 82 development periods (columns). Each row represents accounts that first entered default status in a particular calendar month, and the columns track the aggregate outstanding balance of that cohort at each subsequent month.
+The foundation of the model is a recovery triangle. In the reference implementation this is stored in the "RR LGD TERM STRUCTURE ALL" sheet, but the framework accepts any workbook with the same columnar structure. Each row represents a default cohort (accounts that first entered default status in a particular calendar month), and the columns track the aggregate outstanding balance of that cohort at each subsequent month.
 
-The key fields are as follows. **Period** is the calendar month of default (March 2019 through December 2025). **TID** (Time in Default) represents the maximum number of months of observation available for that cohort — 81 for the oldest cohort and 0 for the most recent. **EAD** is the Exposure at Default, equal to the outstanding balance at the point of default. **TID_0 through TID_81** record the outstanding balance at each month post-default. TID_0 equals the EAD by definition. As time progresses and recoveries occur, these balances decline. Cells are empty (NaN) beyond the cohort's available observation window.
+The key fields are as follows. **Period** is the calendar month of default. **TID** (Time in Default) represents the maximum number of months of observation available for that cohort — the oldest cohort has the highest TID and the most recent cohort has TID = 0. **EAD** is the Exposure at Default, equal to the outstanding balance at the point of default. **TID_0 through TID_N** record the outstanding balance at each month post-default. TID_0 equals the EAD by definition. As time progresses and recoveries occur, these balances decline. Cells are empty (NaN) beyond the cohort's available observation window.
 
 ### 3.2 Vintage Window Construction
 
-The model operates on rolling 60-month windows of the master data. The oldest vintage window ("22-81") uses master cohorts 0 through 59, while the latest vintage ("0-59") uses cohorts 22 through 81. Each vintage window represents the sum of the performing exposures at the start of the period that migrated to the non-performing category during the period which is generally monthly. Crucially, within each vintage, each cohort's balance data is restricted to only those TID periods that would have been observable at the vintage date. A cohort that defaulted k months before the vintage end-date can observe at most k months of recovery data, regardless of how much subsequent data exists in the master.
+The framework operates on rolling windows of the master data with a configurable window size (default 60 months). Each vintage window represents a set of consecutive default cohorts used to calibrate one LGD term structure. Crucially, within each vintage, each cohort's balance data is restricted to only those TID periods that would have been observable at the vintage date. A cohort that defaulted k months before the vintage end-date can observe at most k months of recovery data, regardless of how much subsequent data exists in the master.
 
 ---
 
@@ -84,11 +84,11 @@ where the summation runs over all development periods c ≥ t. This gives the pr
 
 ### 4.6 EAD-Weighted Average
 
-The overall portfolio LGD is computed as the EAD-weighted average across cohorts:
+The overall EAD-weighted LGD is computed as the weighted average across cohorts:
 
     Weighted_LGD = Σᵢ (LGD(TIDᵢ) × EADᵢ) / Σᵢ EADᵢ
 
-where TIDᵢ is the maximum observed time-in-default for cohort i and EADᵢ is its exposure at default. This produces a single summary statistic reflecting the current portfolio composition.
+where TIDᵢ is the maximum observed time-in-default for cohort i and EADᵢ is its exposure at default. This produces a single summary statistic reflecting the current cohort composition.
 
 ---
 
@@ -160,41 +160,55 @@ The residual distribution exhibits approximate symmetry (skewness = 0.19) but is
 
 ---
 
-## 6. Spreadsheet Architecture
+## 6. Spreadsheet Architecture and Audit Trail Export
 
-### 6.1 Sheet Map
+### 6.1 Workbook Structure
 
-The workbook contains 33 sheets organised into the following groups.
+The framework generates per-window audit trail workbooks that replicate the reference workbook structure. When new data is uploaded through the UI, these workbooks are regenerated automatically from the fresh analysis results. Each workbook contains:
 
-**Parameter Sheets** ("Munic parameters" variants) contain the probability of default results by days-past-due bucket, broken out by Metros, Non-Metros, and Consolidated.
+**Master Data** ("RR LGD TERM STRUCTURE ALL") — the complete recovery triangle that all calculations reference.
 
-**Master Data** ("RR LGD TERM STRUCTURE ALL") holds the complete 82-cohort recovery triangle that all calculations reference.
+**LGD Term Structure Summary** — one row per vintage with LGD values at each TID.
 
-**Calculation Sheets**  — The workbook contains one vintage-specific calculation sheet per vintage in the backtest set, each named "RR LGD TERM STRUCTURES (X-Y)" where X-Y denotes the cohort range. The number of these sheets is not fixed — it is determined dynamically by the number of vintages in the backtest vintage set. In the prototype, this produces 23 sheets, but any implementation must handle an arbitrary vintage count.
+**Vintage Calculation Sheets** — one sheet per vintage, named "RR LGD TERM STRUCTURES (X-Y)" where X-Y denotes the cohort range. The number of sheets is determined dynamically by the number of vintages in the backtest set. Each vintage sheet contains seven computational blocks:
 
-Each vintage sheet contains seven computational blocks:
-
-1. The observation-masked balance triangle
-2. The weighted LGD lookup row
-3. Model parameters
-4. Aggregate recovery amounts
+1. The observation-masked balance triangle (cohort metadata, EAD, MIN balance, balance values)
+2. The weighted LGD and check row
+3. Model parameters (interest rate, columns, rows, min)
+4. Aggregate recovery vector
 5. Cumulative balance matrix
 6. Discount factor matrix
-7. The LGD term structure calculation
+7. LGD component matrix (Recovery / CumBal x DF)
 
-The un-suffixed "RR LGD TERM STRUCTURES" sheet is structurally identical to the latest vintage (e.g. 0-59 in the prototype) and always reflects whichever vintage has the shortest cohort range in the current dataset.
+**LGD Backtest Summary** — forecast, actual, mean, upper CI, lower CI, residuals, and summary statistics.
 
-**Summary Sheets** 
+### 6.2 Audit Trail Purpose
 
-**Reference Sheets** — "INSTRUCTIONS" provides tab descriptions. Additional sheets cover PD calculations, roll-to-default analysis, and delinquency tracking.
+The full audit trail workbooks serve as the bridge between the UI and the underlying mathematics. Users can:
 
-### 6.2 Key Formulas
+- Verify every intermediate calculation step per vintage
+- Trace the LGD at any TID back through the component matrix to the raw recovery and balance data
+- Compare workbook values cell-by-cell against the dashboard results
+- Confirm that the observation mask correctly restricts data to the vintage date
+
+The workbooks are generated on-the-fly from the same computation engine that powers the dashboard, so values always match exactly.
+
+### 6.3 Download Options
+
+The UI provides two audit trail download options:
+
+- **Single window** — select any window size and download its full audit trail workbook
+- **All windows (ZIP)** — download a ZIP file containing audit trail workbooks for all selected window sizes
+
+These complement the existing summary exports (multi-scenario Excel, single-window summary, HTML dashboard).
+
+### 6.4 Key Formulas
 
 The recovery at development period n is computed as an array formula: `{=SUM(IF(col_{n+1}<>"", col_n)) - SUM(col_{n+1})}`, where the IF condition restricts the sum to cohorts with observations at the next period.
 
 The cumulative balance denominator for row r, column c is: `{=SUM(IF(col_{c+1}<>"", col_r))}`, applying the same observation mask.
 
-The discount factor is: `=1/(1+rate)^((col-row)/12)` where the rate cell contains 0.15.
+The discount factor is: `=1/(1+rate)^((col-row)/12)` where the rate is configurable (default 0.15).
 
 The LGD at each TID is: `=1 - SUMPRODUCT(recovery_rates, discount_factors)`, where recovery rates are `=IFERROR(Recovery/CumBal, 0)`.
 
@@ -204,7 +218,7 @@ The LGD at each TID is: `=1 - SUMPRODUCT(recovery_rates, discount_factors)`, whe
 
 ### 7.1 Model Performance
 
-The development factor model performs well for this portfolio. The mean forecast error is near zero (0.7%), confirming absence of systematic bias. The standard deviation of 9.4% reflects moderate forecast uncertainty, which is expected given the heterogeneous nature of municipal payment behaviour.
+The development factor framework performs well on the reference dataset. The mean forecast error is near zero (0.7%), confirming absence of systematic bias. The standard deviation of 9.4% reflects moderate forecast uncertainty, which is expected given the heterogeneous nature of recovery behaviour across default cohorts.
 
 ### 7.2 Issues Identified
 
