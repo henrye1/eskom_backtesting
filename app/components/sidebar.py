@@ -11,7 +11,7 @@ def render_sidebar() -> dict:
     -------
     dict
         Keys: uploaded_file, window_sizes, ci_percentile,
-        discount_rate, lgd_cap, run_clicked.
+        discount_rate, lgd_cap, store_detail.
     """
     st.sidebar.header("Model Parameters")
 
@@ -62,8 +62,11 @@ def render_sidebar() -> dict:
 
     lgd_cap = st.sidebar.checkbox("Cap LGD at 1.0", value=False)
 
-    st.sidebar.markdown("---")
-    run_clicked = st.sidebar.button("Run Analysis", type="primary")
+    store_detail = st.sidebar.checkbox(
+        "Store triangle details (for inspection)",
+        value=True,
+        help="Enable to inspect balance matrices, recovery vectors, etc. per vintage.",
+    )
 
     return {
         'uploaded_file': uploaded_file,
@@ -71,5 +74,5 @@ def render_sidebar() -> dict:
         'ci_percentile': ci_percentile,
         'discount_rate': discount_rate,
         'lgd_cap': 1.0 if lgd_cap else None,
-        'run_clicked': run_clicked,
+        'store_detail': store_detail,
     }

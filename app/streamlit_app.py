@@ -54,21 +54,22 @@ def _load_data(file_bytes: bytes, _file_hash: str):
         os.unlink(tmp_path)
 
 
-def _run_scenarios_uncached(
+@st.cache_data(show_spinner="Running multi-scenario analysis...")
+def _run_scenarios_cached(
     file_bytes: bytes,
     file_hash: str,
     window_sizes: tuple[int, ...],
     discount_rate: float,
     lgd_cap: float | None,
-    ci_percentile: float = 0.75,
-    store_detail: bool = False,
+    ci_percentile: float,
+    store_detail: bool,
     max_tid: int = 60,
 ) -> list[ScenarioResult]:
-    """Run multi-scenario analysis."""
+    """Run multi-scenario analysis, cached on all parameters."""
     master_df = _load_data(file_bytes, file_hash)
     base_config = ModelConfig(
         discount_rate=discount_rate,
-        window_size=60,  # Reference window for alignment
+        window_size=60,
         max_tid=max_tid,
         lgd_cap=lgd_cap,
         ci_percentile=ci_percentile,
@@ -84,10 +85,10 @@ def _run_scenarios_uncached(
     return scenarios
 
 
-# Render sidebar
+# Render sidebar (no more "Run Analysis" button — auto-runs on parameter change)
 params = render_sidebar()
 
-if params['uploaded_file'] is not None and params['run_clicked']:
+if params['uploaded_file'] is not None:
     file_bytes = params['uploaded_file'].getvalue()
     file_hash = hashlib.md5(file_bytes).hexdigest()
 
@@ -95,23 +96,15 @@ if params['uploaded_file'] is not None and params['run_clicked']:
         st.error("Please select at least one window size.")
         st.stop()
 
-    # Add toggle for triangle detail storage
-    store_detail = st.sidebar.checkbox(
-        "Store triangle details (for inspection)",
-        value=True,
-        help="Enable to inspect balance matrices, recovery vectors, etc. per vintage.",
+    scenarios = _run_scenarios_cached(
+        file_bytes=file_bytes,
+        file_hash=file_hash,
+        window_sizes=tuple(sorted(params['window_sizes'])),
+        discount_rate=params['discount_rate'],
+        lgd_cap=params['lgd_cap'],
+        ci_percentile=params['ci_percentile'],
+        store_detail=params['store_detail'],
     )
-
-    with st.spinner("Running multi-scenario analysis..."):
-        scenarios = _run_scenarios_uncached(
-            file_bytes=file_bytes,
-            file_hash=file_hash,
-            window_sizes=tuple(sorted(params['window_sizes'])),
-            discount_rate=params['discount_rate'],
-            lgd_cap=params['lgd_cap'],
-            ci_percentile=params['ci_percentile'],
-            store_detail=store_detail,
-        )
 
     if not scenarios:
         st.error("No scenarios produced valid results. Check your data.")
@@ -120,22 +113,45 @@ if params['uploaded_file'] is not None and params['run_clicked']:
     # KPI cards
     render_summary_cards(scenarios[0])
 
-    # ── Window selector (applies to all sections) ──
+    # ── Window selector with descriptive label ──
     st.markdown("---")
+
+    best_window = scenarios[0].window_size
+
+    def _format_window(w: int) -> str:
+        parts = [f"{w}-month window"]
+        s = next((s for s in scenarios if s.window_size == w), None)
+        if s is not None:
+            parts.append(f"RMSE {s.rmse:.4f}")
+            parts.append(f"LGD₀ {s.latest_lgd_tid0:.4f}")
+        if w == 60:
+            parts.append("full")
+        if w == best_window:
+            parts.append("★ recommended")
+        return " | ".join(parts)
+
     sel_window = st.selectbox(
-        "Select min-observation window",
+        "Review window — select to inspect backtest details below",
         options=[s.window_size for s in scenarios],
         index=next(
             (i for i, s in enumerate(scenarios) if s.window_size == 60),
             0,
         ),
-        format_func=lambda w: f"{w} months"
-            + (" (full)" if w == 60 else "")
-            + (" (recommended)" if w == scenarios[0].window_size else ""),
+        format_func=_format_window,
     )
     sel_scenario = next(
         (s for s in scenarios if s.window_size == sel_window),
         scenarios[0],
+    )
+
+    # ── Active selection banner ──
+    st.info(
+        f"**Reviewing: {sel_window}-month window** — "
+        f"{sel_scenario.n_vintages} vintages, "
+        f"{sel_scenario.n_residuals} residuals, "
+        f"RMSE {sel_scenario.rmse:.4f}, "
+        f"MAE {sel_scenario.mae:.4f}, "
+        f"Bias {sel_scenario.mean_error:+.4f}"
     )
 
     # ── 1. Full Backtest Summary (all tables + per-vintage CI blocks) ──
@@ -188,6 +204,7 @@ if params['uploaded_file'] is not None and params['run_clicked']:
             options=[s.window_size for s in scenarios],
             index=0,
             key="dl_window",
+            format_func=lambda w: f"{w}-month window",
         )
         dl_scenario = next(
             (s for s in scenarios if s.window_size == dl_window),
@@ -227,7 +244,5 @@ if params['uploaded_file'] is not None and params['run_clicked']:
             mime="text/html",
         )
 
-elif params['uploaded_file'] is None:
-    st.info("Upload an Excel workbook and click **Run Analysis** to begin.")
 else:
-    st.info("Click **Run Analysis** to start the computation.")
+    st.info("Upload an Excel workbook to begin. Analysis runs automatically.")
