@@ -79,6 +79,11 @@ def _style_data(cell, fmt=None):
         cell.number_format = fmt
 
 
+def _hide_gridlines(ws):
+    """Hide gridlines on a worksheet."""
+    ws.sheet_view.showGridLines = False
+
+
 def _write_val(ws, row, col, val, fmt=None, font=None):
     cell = ws.cell(row=row, column=col, value=val)
     cell.font = font or _DATA_FONT
@@ -187,6 +192,10 @@ def export_results_to_excel(
         lower_df.insert(0, 'Period', bt.periods)
         lower_df.to_excel(writer, sheet_name='Lower CI (SEM Scaled)')
 
+        # Hide gridlines on all sheets
+        for ws in writer.book.worksheets:
+            _hide_gridlines(ws)
+
     print(f"\n  Results exported to: {output_path}")
 
 
@@ -226,6 +235,10 @@ def export_multi_scenario_excel(
                 'Recovery': 1.0 - latest.lgd_term_structure,
             })
             lgd_df.to_excel(writer, sheet_name=f'{ws}m LGD Term', index=False)
+
+        # Hide gridlines on all sheets
+        for sheet in writer.book.worksheets:
+            _hide_gridlines(sheet)
 
     print(f"\n  Multi-scenario results exported to: {output_path}")
 
@@ -291,8 +304,6 @@ def _write_vintage_calc_sheet(
         _write_val(ws, r, 2, int(master_tids_window[i]))
         # Column C: per-cohort LGD — formula referencing Check row (written later)
         # (deferred to after Check row is positioned)
-        _write_val(ws, r, 4, float(eads_window[i]), fmt=_NUM_FMT)
-        _write_val(ws, r, 6, i)
 
         # Column G: MIN balance — FORMULA
         bal_range = _row_rng(r, BC, BC + n_periods - 1)
@@ -338,8 +349,8 @@ def _write_vintage_calc_sheet(
             cn = get_column_letter(BC + n)
             cn1 = get_column_letter(BC + n + 1)
             cell.value = (
-                f'=SUM(IF({cn1}${r1}:{cn1}${r2}<>"",'
-                f'{cn}${r1}:{cn}${r2}))'
+                f'=SUMPRODUCT(({cn1}${r1}:{cn1}${r2}<>"")*'
+                f'{cn}${r1}:{cn}${r2})'
                 f'-SUM({cn1}${r1}:{cn1}${r2})'
             )
         else:
@@ -366,8 +377,8 @@ def _write_vintage_calc_sheet(
                 br_letter = get_column_letter(BC + t_row)
                 cond_letter = get_column_letter(BC + cond_col_idx)
                 cell.value = (
-                    f'=SUM(IF({cond_letter}${r1}:{cond_letter}${r2}<>"",'
-                    f'${br_letter}${r1}:${br_letter}${r2}))'
+                    f'=SUMPRODUCT(({cond_letter}${r1}:{cond_letter}${r2}<>"")*'
+                    f'${br_letter}${r1}:${br_letter}${r2})'
                 )
             _style_data(cell, _NUM_FMT)
 
@@ -417,54 +428,59 @@ def _write_vintage_calc_sheet(
                 cell.value = f'=IFERROR({rec}/{cb},0)'
             _style_data(cell, _PCT_FMT)
 
-    # ── LGD term structure — FORMULAS ──
-    # Matches reference: =1-SUMPRODUCT(component_row, discount_row)
-    # Written in column E/F AND Check row
+    # ── LGD term structure — FORMULAS (columns E/F starting at row 2) ──
+    # Aligned with cohort rows so A2:A61 corresponds to E2:F62
     # Column E = TID index, Column F = LGD value
+    LGD_R1 = BR1  # Start at row 2 to align with cohort data
+    _write_val(ws, 1, 5, 'TID', font=_HDR_FONT)
+    ws.cell(1, 5).fill = _HDR_FILL
+    _write_val(ws, 1, 6, 'LGD', font=_HDR_FONT)
+    ws.cell(1, 6).fill = _HDR_FILL
     cap = config.lgd_cap
     for t in range(n_periods):
         # Column E: TID index
-        ws.cell(row=COMP_ROW + t, column=5,
-                value=f'={_ref(COMP_ROW + t, 7)}')
-        # Column F: LGD = 1 - SUMPRODUCT(component_row, discount_row)
+        ws.cell(row=LGD_R1 + t, column=5, value=t)
+        # Column F: LGD = IFERROR(1 - SUMPRODUCT(component_row, discount_row), 1)
         comp_rng = _row_rng(COMP_ROW + t, BC + t, BC + n_periods - 1)
         disc_rng = _row_rng(DISC_ROW + t, BC + t, BC + n_periods - 1)
         if cap is not None:
-            formula = f'=MIN({cap},1-SUMPRODUCT({comp_rng},{disc_rng}))'
+            inner = f'MIN({cap},1-SUMPRODUCT({comp_rng},{disc_rng}))'
         else:
-            formula = f'=1-SUMPRODUCT({comp_rng},{disc_rng})'
-        cell = ws.cell(row=COMP_ROW + t, column=6, value=formula)
+            inner = f'1-SUMPRODUCT({comp_rng},{disc_rng})'
+        formula = f'=IFERROR({inner},1)'
+        cell = ws.cell(row=LGD_R1 + t, column=6, value=formula)
         _style_data(cell, _PCT_FMT)
     # Last TID = 1.0
-    ws.cell(row=COMP_ROW + n_periods, column=5, value=n_periods)
-    ws.cell(row=COMP_ROW + n_periods, column=6, value=1.0)
-    _style_data(ws.cell(row=COMP_ROW + n_periods, column=6), _PCT_FMT)
+    ws.cell(row=LGD_R1 + n_periods, column=5, value=n_periods)
+    ws.cell(row=LGD_R1 + n_periods, column=6, value=1.0)
+    _style_data(ws.cell(row=LGD_R1 + n_periods, column=6), _PCT_FMT)
 
     # Check row: VLOOKUP into the E/F LGD lookup table
-    # Matches reference: =IFERROR(VLOOKUP(H1,$E$198:$F$258,2,FALSE),1)
-    lgd_lookup = f'$E${COMP_ROW}:$F${COMP_ROW + n_periods}'
+    lgd_lookup = f'$E${LGD_R1}:$F${LGD_R1 + n_periods}'
     for t in range(n_periods + 1):
         tid_cell = _ref(1, BC + t)  # TID number from header row
         formula = f'=IFERROR(VLOOKUP({tid_cell},{lgd_lookup},2,FALSE),1)'
         cell = ws.cell(row=CHECK_ROW, column=BC + t, value=formula)
         _style_data(cell, _PCT_FMT)
 
-    # ── Per-cohort LGD (column C) — HLOOKUP into Check row ──
-    # Matches reference: =HLOOKUP($A2,$H$1:$BP$64,64,FALSE)
+    # ── Per-cohort LGD (column C) — IFERROR HLOOKUP into Check row ──
     last_tid_col = get_column_letter(BC + n_periods)
-    check_row_offset = CHECK_ROW - 1 + 1  # HLOOKUP row_index is 1-based from range top
     for i in range(n_cohorts):
         r = BR1 + i
         a_ref = f'$A{r}'
         lookup_range = f'${get_column_letter(BC)}$1:{last_tid_col}${CHECK_ROW}'
         cell = ws.cell(
             row=r, column=3,
-            value=f'=HLOOKUP({a_ref},{lookup_range},{CHECK_ROW},FALSE)',
+            value=f'=IFERROR(HLOOKUP({a_ref},{lookup_range},{CHECK_ROW},FALSE),1)',
         )
         _style_data(cell, _PCT_FMT)
 
+    # ── EAD in column D (needed for weighted LGD) ──
+    for i in range(n_cohorts):
+        r = BR1 + i
+        _write_val(ws, r, 4, float(eads_window[i]), fmt=_NUM_FMT)
+
     # ── Weighted LGD — FORMULA ──
-    # Matches reference: =IFERROR(SUMPRODUCT(C:C,D:D)/SUM(D:D),"")
     lgd_col = _col_rng(3, BR1, BR2)
     ead_col = _col_rng(4, BR1, BR2)
     cell = ws.cell(
@@ -481,7 +497,8 @@ def _write_vintage_calc_sheet(
     ws.column_dimensions['B'].width = 6
     ws.column_dimensions['C'].width = 12
     ws.column_dimensions['D'].width = 14
-    ws.column_dimensions['F'].width = 6
+    ws.column_dimensions['E'].width = 6
+    ws.column_dimensions['F'].width = 12
     ws.column_dimensions['G'].width = 14
     return ws
 
@@ -802,6 +819,10 @@ def export_full_audit_workbook(
     ws_bt.column_dimensions['A'].width = 22
     ws_bt.column_dimensions['B'].width = 14
     ws_bt.column_dimensions['C'].width = 14
+
+    # Hide gridlines on all sheets
+    for ws in wb.worksheets:
+        _hide_gridlines(ws)
 
     # Serialize to bytes
     buf = io.BytesIO()
