@@ -59,6 +59,36 @@ def _load_data(file_bytes: bytes, _file_hash: str):
         os.unlink(tmp_path)
 
 
+@st.cache_data(show_spinner="Generating audit workbook...")
+def _generate_audit_workbook(
+    file_bytes: bytes,
+    file_hash: str,
+    scenario: ScenarioResult,
+    config: ModelConfig,
+) -> bytes:
+    """Generate a single audit workbook, cached."""
+    master_df = _load_data(file_bytes, file_hash)
+    return export_full_audit_workbook(master_df, scenario, config)
+
+
+@st.cache_data(show_spinner="Generating all audit workbooks (ZIP)...")
+def _generate_all_audit_zip(
+    file_bytes: bytes,
+    file_hash: str,
+    window_sizes: tuple[int, ...],
+    config: ModelConfig,
+) -> bytes:
+    """Generate ZIP of all audit workbooks, cached."""
+    master_df = _load_data(file_bytes, file_hash)
+    # Re-run scenarios to get results (cached upstream)
+    scenarios = _run_scenarios_cached(
+        file_bytes, file_hash, window_sizes,
+        config.discount_rate, config.lgd_cap,
+        config.ci_percentile, False, config.max_tid,
+    )
+    return export_all_audit_workbooks_zip(master_df, scenarios, config)
+
+
 @st.cache_data(show_spinner="Running multi-scenario analysis...")
 def _run_scenarios_cached(
     file_bytes: bytes,
@@ -189,16 +219,7 @@ if params['uploaded_file'] is not None:
     st.markdown("---")
     st.subheader("Downloads")
 
-    # Build shared config for exports
-    export_config = ModelConfig(
-        discount_rate=params['discount_rate'],
-        window_size=60,
-        max_tid=60,
-        lgd_cap=params['lgd_cap'],
-        ci_percentile=params['ci_percentile'],
-    )
-
-    # Load master_df for full audit workbooks
+    # Load master_df for exports
     master_df = _load_data(file_bytes, file_hash)
 
     # ── Row 1: Full audit trail workbooks ──
@@ -227,21 +248,38 @@ if params['uploaded_file'] is not None:
             (s for s in scenarios if s.window_size == dl_audit_window),
             scenarios[0],
         )
-        audit_bytes = export_full_audit_workbook(
-            master_df, dl_audit_scenario, export_config,
+        audit_cfg = ModelConfig(
+            discount_rate=params['discount_rate'],
+            window_size=60,
+            max_tid=60,
+            lgd_cap=params['lgd_cap'],
+            ci_percentile=params['ci_percentile'],
+            min_obs_window=dl_audit_window if dl_audit_window < 60 else None,
+        )
+        audit_bytes = _generate_audit_workbook(
+            file_bytes, file_hash, dl_audit_scenario, audit_cfg,
         )
         st.download_button(
             f"Download {dl_audit_window}m Full Audit Workbook",
             data=audit_bytes,
-            file_name=f"Munic_dashboard_LPU_1_{dl_audit_window}m.xlsx",
+            file_name=f"LGD_Audit_{dl_audit_window}m.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
     with col_a2:
-        st.markdown("&nbsp;")  # spacer
         st.markdown("&nbsp;")
-        zip_bytes = export_all_audit_workbooks_zip(
-            master_df, scenarios, export_config,
+        st.markdown("&nbsp;")
+        zip_cfg = ModelConfig(
+            discount_rate=params['discount_rate'],
+            window_size=60,
+            max_tid=60,
+            lgd_cap=params['lgd_cap'],
+            ci_percentile=params['ci_percentile'],
+        )
+        zip_bytes = _generate_all_audit_zip(
+            file_bytes, file_hash,
+            tuple(s.window_size for s in scenarios),
+            zip_cfg,
         )
         st.download_button(
             "Download All Audit Workbooks (ZIP)",
@@ -279,9 +317,16 @@ if params['uploaded_file'] is not None:
             (s for s in scenarios if s.window_size == dl_window),
             scenarios[0],
         )
+        dl_cfg = ModelConfig(
+            discount_rate=params['discount_rate'],
+            window_size=60,
+            max_tid=60,
+            lgd_cap=params['lgd_cap'],
+            ci_percentile=params['ci_percentile'],
+        )
         tmp_path = tempfile.mktemp(suffix='.xlsx')
         export_results_to_excel(
-            dl_scenario.vintage_results, dl_scenario.backtest, export_config, tmp_path
+            dl_scenario.vintage_results, dl_scenario.backtest, dl_cfg, tmp_path
         )
         with open(tmp_path, 'rb') as f:
             data = f.read()

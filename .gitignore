@@ -21,7 +21,16 @@ ENV/
 
 # Data files
 data/*.xlsx
+*.xlsx
 
+# Generated outputs
+LGD_Dashboard.html
+LGD_Model_Output*.xlsx
+LGD_Multi_Scenario_Output*.xlsx
+
+# Documentation binaries (keep source .md, ignore generated)
+*.pdf
+*.docx
 
 # OS
 .DS_Store
