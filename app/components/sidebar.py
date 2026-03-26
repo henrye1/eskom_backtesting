@@ -51,16 +51,26 @@ def render_sidebar() -> dict:
     )
 
     st.sidebar.subheader("Model Settings")
-    discount_rate = st.sidebar.number_input(
-        "Discount Rate (annual)",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.15,
+    discount_rate_pct = st.sidebar.number_input(
+        "Discount Rate — enter as % (e.g. 15.00 = 15%)",
+        min_value=0.00,
+        max_value=100.00,
+        value=15.00,
         step=0.01,
         format="%.2f",
+        help="Annual discount rate as a percentage. 15.00 means 15%.",
     )
+    discount_rate = discount_rate_pct / 100.0
+    st.sidebar.caption(f"Discount rate: {discount_rate_pct:.2f}% → {discount_rate:.4f}")
 
     lgd_cap = st.sidebar.checkbox("Cap LGD at 1.0", value=False)
+
+    monotone_lgd = st.sidebar.checkbox(
+        "Enforce monotone LGD",
+        value=True,
+        help="LGD(t) = max(LGD(t), LGD(t-1)) — prevents the term structure "
+             "from dipping below a previous period.",
+    )
 
     store_detail = st.sidebar.checkbox(
         "Store triangle details (for inspection)",
@@ -74,5 +84,6 @@ def render_sidebar() -> dict:
         'ci_percentile': ci_percentile,
         'discount_rate': discount_rate,
         'lgd_cap': 1.0 if lgd_cap else None,
+        'monotone_lgd': monotone_lgd,
         'store_detail': store_detail,
     }

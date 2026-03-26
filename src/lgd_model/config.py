@@ -30,6 +30,10 @@ class ModelConfig:
         cohorts that have data at that TID. This decouples the forecast
         horizon from the calibration depth.
         None = use all cohorts (original behaviour). Default None.
+    monotone_lgd : bool
+        If True, enforce monotonically non-decreasing LGD across TIDs.
+        LGD(t) = max(LGD(t), LGD(t-1)) so that the term structure never
+        dips below a previous period. Default True.
     """
 
     discount_rate: float = 0.15
@@ -38,3 +42,4 @@ class ModelConfig:
     lgd_cap: float | None = None
     ci_percentile: float = 0.75
     min_obs_window: int | None = None
+    monotone_lgd: bool = True

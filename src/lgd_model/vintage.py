@@ -151,7 +151,10 @@ def run_single_vintage(
     recoveries = compute_aggregate_recoveries(window, config.min_obs_window)
     cum_bal = compute_cumulative_balances(window, config.min_obs_window)
     discount_mat = compute_discount_matrix(config.discount_rate, n_periods)
-    lgd = compute_lgd_term_structure(recoveries, cum_bal, discount_mat, config.lgd_cap)
+    lgd = compute_lgd_term_structure(
+        recoveries, cum_bal, discount_mat,
+        cap=config.lgd_cap, monotone=config.monotone_lgd,
+    )
 
     detail = None
     if store_detail:

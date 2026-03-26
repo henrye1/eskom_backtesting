@@ -437,6 +437,7 @@ def _write_vintage_calc_sheet(
     _write_val(ws, 1, 6, 'LGD', font=_HDR_FONT)
     ws.cell(1, 6).fill = _HDR_FILL
     cap = config.lgd_cap
+    monotone = config.monotone_lgd
     for t in range(n_periods):
         # Column E: TID index
         ws.cell(row=LGD_R1 + t, column=5, value=t)
@@ -447,7 +448,13 @@ def _write_vintage_calc_sheet(
             inner = f'MIN({cap},1-SUMPRODUCT({comp_rng},{disc_rng}))'
         else:
             inner = f'1-SUMPRODUCT({comp_rng},{disc_rng})'
-        formula = f'=IFERROR({inner},1)'
+        raw = f'IFERROR({inner},1)'
+        # Monotonicity: LGD(t) = MAX(LGD(t), LGD(t-1))
+        if monotone and t > 0:
+            prev_ref = _ref(LGD_R1 + t - 1, 6)
+            formula = f'=MAX({raw},{prev_ref})'
+        else:
+            formula = f'={raw}'
         cell = ws.cell(row=LGD_R1 + t, column=6, value=formula)
         _style_data(cell, _PCT_FMT)
     # Last TID = 1.0

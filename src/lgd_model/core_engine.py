@@ -164,6 +164,7 @@ def compute_lgd_term_structure(
     cum_bal: np.ndarray,
     discount_matrix: np.ndarray,
     cap: float | None = None,
+    monotone: bool = True,
 ) -> np.ndarray:
     """Compute the LGD term structure from recoveries and cumulative balances.
 
@@ -182,6 +183,9 @@ def compute_lgd_term_structure(
         Shape (n_periods, n_periods).
     cap : float or None
         If set, clip LGD values to this maximum.
+    monotone : bool
+        If True, enforce monotonically non-decreasing LGD across TIDs.
+        LGD(t) = max(LGD(t), LGD(t-1)). Default True.
 
     Returns
     -------
@@ -199,6 +203,9 @@ def compute_lgd_term_structure(
         lgd[t] = 1.0 - discounted_recovery
     if cap is not None:
         lgd = np.clip(lgd, None, cap)
+    if monotone:
+        for t in range(1, len(lgd)):
+            lgd[t] = max(lgd[t], lgd[t - 1])
     return lgd
 
 

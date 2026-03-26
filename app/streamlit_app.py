@@ -98,6 +98,7 @@ def _run_scenarios_cached(
     lgd_cap: float | None,
     ci_percentile: float,
     store_detail: bool,
+    monotone_lgd: bool = True,
     max_tid: int = 60,
 ) -> list[ScenarioResult]:
     """Run multi-scenario analysis, cached on all parameters."""
@@ -108,6 +109,7 @@ def _run_scenarios_cached(
         max_tid=max_tid,
         lgd_cap=lgd_cap,
         ci_percentile=ci_percentile,
+        monotone_lgd=monotone_lgd,
     )
 
     scenarios: list[ScenarioResult] = []
@@ -139,6 +141,7 @@ if params['uploaded_file'] is not None:
         lgd_cap=params['lgd_cap'],
         ci_percentile=params['ci_percentile'],
         store_detail=params['store_detail'],
+        monotone_lgd=params['monotone_lgd'],
     )
 
     if not scenarios:
@@ -255,6 +258,7 @@ if params['uploaded_file'] is not None:
             lgd_cap=params['lgd_cap'],
             ci_percentile=params['ci_percentile'],
             min_obs_window=dl_audit_window if dl_audit_window < 60 else None,
+            monotone_lgd=params['monotone_lgd'],
         )
         audit_bytes = _generate_audit_workbook(
             file_bytes, file_hash, dl_audit_scenario, audit_cfg,
@@ -275,6 +279,7 @@ if params['uploaded_file'] is not None:
             max_tid=60,
             lgd_cap=params['lgd_cap'],
             ci_percentile=params['ci_percentile'],
+            monotone_lgd=params['monotone_lgd'],
         )
         zip_bytes = _generate_all_audit_zip(
             file_bytes, file_hash,
@@ -323,6 +328,7 @@ if params['uploaded_file'] is not None:
             max_tid=60,
             lgd_cap=params['lgd_cap'],
             ci_percentile=params['ci_percentile'],
+            monotone_lgd=params['monotone_lgd'],
         )
         tmp_path = tempfile.mktemp(suffix='.xlsx')
         export_results_to_excel(
